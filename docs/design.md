@@ -1,0 +1,280 @@
+# ProjectFlow 設計書
+
+> 初版: 2026-10-30 / 最終更新: 2026-10-30（Phase 1 完了時点）
+> 対象: 要件定義書「プロジェクト管理アプリ 要件定義書」
+> ステータス: **確定**（確認事項 Q1〜Q4 は 2026-10-30 に回答済み。「7. 決定事項」参照）
+
+関連資料: [ER 図・テーブル設計](./er-diagram.md) / [進捗・フェーズ報告](./progress.md)
+
+---
+
+## 1. 要件分析サマリ
+
+| 観点 | 内容 |
+|---|---|
+| 中心機能 | プロジェクト単位のカンバン（Todo / In Progress / Done）とドラッグ＆ドロップ |
+| 利用規模 | 個人〜10人程度。1 プロジェクトあたりタスク数は数十〜数百件を想定 |
+| 認可モデル | プロジェクト単位のメンバーシップ（Owner / Member）。所属外プロジェクトは一切参照不可 |
+| データ量 | 小規模。リアルタイム同期や大規模スケールは不要 |
+| 公開形態 | Vercel + マネージド PostgreSQL、デモアカウントあり |
+| 品質要件 | 単体・統合・E2E テスト、GitHub Actions による CI |
+
+---
+
+## 2. 技術選定
+
+### 2.1 採用バージョン（2026-10-30 時点の安定版。`package.json` で完全固定）
+
+`.npmrc` に `save-exact=true` を設定し、すべての依存を `^` なしで固定している。
+
+| 分類 | パッケージ | バージョン | 備考 |
+|---|---|---|---|
+| フレームワーク | next | 16.4.3 | App Router。`middleware.ts` は `proxy.ts` に改名済み |
+| UI | react / react-dom | 19.3.0 | create-next-app 16.4.3 が指定する版 |
+| 言語 | typescript | 5.9.3 | 7.x（Go 移植版）は ESLint / Next.js との互換性を優先して見送り |
+| CSS | tailwindcss | 4.3.3 | CSS ファースト設定 |
+| UI 部品 | shadcn (CLI) / radix-ui | 4.23.0 / 1.8.1 | プリセット `radix-nova`。生成コードは `src/components/ui` |
+| DB | PostgreSQL | 17 | ローカルは Docker、本番は Neon を予定 |
+| ORM | prisma / @prisma/client / @prisma/adapter-pg | **7.10.1** | npm の `latest` タグは 8.0.0-rc のため明示的に 7.10.1 を指定 |
+| 認証 | better-auth | 1.7.14 | Auth.js から変更（2.2 参照）。Prisma アダプタは同梱 |
+| 検証 | zod | 4.6.7 | v4 API（`error` パラメータ） |
+| フォーム | react-hook-form / @hookform/resolvers | 7.91.0 / 6.0.2 | |
+| D&D | @dnd-kit/core / sortable | 6.3.1 / 10.0.0 | Phase 2 で導入。新 API `@dnd-kit/react` は 0.x のため不採用 |
+| テーマ | next-themes | 0.4.6 | ダークモード（shadcn/ui 標準の方式） |
+| 通知 | sonner | 2.0.8 | トースト（shadcn/ui 標準） |
+| メール | resend | 6.35.0 | 本番のパスワード再設定メール |
+| テスト | vitest / @playwright/test | 5.0.5 / 1.64.1 | |
+| Lint | eslint / eslint-config-next | 9.39.5 / 16.4.3 | create-next-app 16.4.3 の構成。ESLint 10 は eslint-config-next 側の対応を待つ |
+
+### 2.2 認証ライブラリ: Auth.js → Better Auth（承認済み）
+
+| 項目 | Auth.js v5 | Better Auth 1.7 |
+|---|---|---|
+| 安定性 | ベータ（5.0.0-beta.32） | 安定版 |
+| メール＋パスワード | Credentials Provider（非推奨扱い）で自前実装 | 標準機能。scrypt でハッシュ化 |
+| パスワード再設定 | 自前実装 | 標準機能（トークン発行・有効期限・使い捨て） |
+| セッション | Credentials 使用時は JWT のみ | DB セッション（ログアウト・再設定時に確実に失効） |
+| レート制限 | なし | 標準機能（DB 保存可） |
+
+**互換性の確認結果**（公式ドキュメントおよびパッケージの peerDependencies）
+
+- `better-auth@1.7.14` の peerDependencies: `prisma` / `@prisma/client` が `^5 || ^6 || ^7`、`next` が `^14 || ^15 || ^16`
+- 公式ドキュメント（Prisma アダプタ）は Prisma 7 + PostgreSQL を前提に記載。Prisma 7 ではドライバアダプタ（`@prisma/adapter-pg`）が必須
+- Prisma 7 の新ジェネレータ（`provider = "prisma-client"`、出力先 `src/generated/prisma`）と `prisma.config.ts` を使用
+- Better Auth の CLI によるスキーマ生成は使わず、公式スキーマと同じフィールド名で `schema.prisma` に手書きした（テーブル名のみ `@@map` で複数形スネークケースに変更）
+
+---
+
+## 3. 推奨アーキテクチャ
+
+### 3.1 全体構成
+
+```mermaid
+flowchart LR
+  Browser[ブラウザ]
+  subgraph Vercel
+    Proxy[proxy.ts<br/>Cookie が無ければ /login へ]
+    RSC[Server Components<br/>データ取得・表示]
+    SA[Server Actions<br/>更新処理]
+    AuthRoute[/api/auth/*<br/>Better Auth/]
+    subgraph Server[サーバー側ロジック]
+      Session[requireUser<br/>DB でセッション検証]
+      Service[サービス / クエリ<br/>認可チェック + トランザクション]
+      Domain[src/domain<br/>純粋関数]
+    end
+  end
+  DB[(PostgreSQL)]
+  Mail[Resend]
+
+  Browser --> Proxy --> RSC
+  Browser -- RHF + Zod --> SA
+  Browser -- authClient --> AuthRoute
+  RSC --> Session --> Service
+  SA -- Zod 検証 --> Session
+  Service --> Domain
+  Service -- Prisma --> DB
+  AuthRoute -- Prisma --> DB
+  AuthRoute -- after() --> Mail
+```
+
+### 3.2 レイヤーと責務
+
+| レイヤー | 置き場所 | 責務 | ルール |
+|---|---|---|---|
+| ページ / レイアウト | `src/app/**` | ルーティング、データ取得の呼び出し | 原則 Server Component。DB を直接触らない |
+| UI コンポーネント | `src/features/*/components`, `src/components` | 表示・操作 | 操作が必要な部分のみ `"use client"` |
+| Server Actions | `src/features/*/actions.ts` | 更新処理の入口 | **①認証 → ②Zod 検証 → ③認可 → ④DB 操作 → ⑤再検証** の順を必ず守る。`runAction` で共通の `ActionResult` に変換 |
+| サービス（更新） | `src/features/*/service.ts` | 認可チェックと DB 更新 | `server-only`。**認可チェックと更新を同一トランザクション**で行う。対象の所属プロジェクトはサーバー側で解決し、クライアントの値を信用しない |
+| クエリ（読み取り） | `src/features/*/queries.ts` | 読み取り | `server-only`。ユーザー ID を必ず条件に含める／`authorizeProject` を通す |
+| 認証・認可 | `src/lib/auth/*` | セッション取得（`requireUser` / `requireActionUser`）、プロジェクト権限検証（`authorizeProject`） | React `cache()` で同一リクエスト内の重複クエリを防ぐ |
+| ドメイン | `src/domain/*` | 権限表、進捗率、日付（期限切れ判定） | フレームワーク・DB 非依存の純粋関数。単体テストの主対象 |
+| バリデーション | `src/features/*/schemas.ts`, `src/lib/validation.ts` | Zod スキーマ | クライアント（RHF）とサーバー（Action）で同じスキーマを共有 |
+| 文言・書式 | `src/i18n/*` | UI 文言・日付 / 数値の書式 | 3.5 参照 |
+
+### 3.3 主要な設計判断
+
+| 項目 | 判断 | 理由 |
+|---|---|---|
+| API 方式 | 更新は Server Actions、読み取りは Server Components から直接クエリ。REST API は作らない | 外部公開 API が要件にない。API 設計資料は「Server Actions 一覧」として Phase 5 で作成 |
+| Cache Components | **無効**（`cacheComponents: false`） | Next.js 16.4 の create-next-app は既定で有効にするが、本アプリは全画面がログインユーザー固有のデータで、静的シェルの恩恵がほぼない。有効にすると全ページでセッション読み取りを `<Suspense>` 内に置く必要があり、構成が複雑になる。更新後は `revalidatePath` で再描画する |
+| 認可エラー | 所属外のプロジェクト・タスクは **NotFound**（存在を隠す）、所属しているが権限不足は **Forbidden** | ID の総当たりで他人のプロジェクトの存在を推測させない |
+| Owner の整合性 | アプリ（トランザクション）と **DB トリガー**の二重で保証 | 「OWNER がちょうど 1 人」を DEFERRABLE な制約トリガーでコミット時に検査。詳細は [er-diagram.md](./er-diagram.md) |
+| エラーハンドリング | サービスは `AppError` 派生クラスを投げ、Action の `runAction` が `{ ok, error, fieldErrors }` に変換。予期しない例外は詳細を返さずログのみ | クライアントへの内部情報の漏えい防止と、UI 側の処理の統一 |
+| ページネーション | プロジェクト一覧はオフセット方式（20 件 / ページ）。検索・絞り込み・並べ替えも URL の searchParams で管理 | 小規模データでは十分。URL 共有・リロードで状態が保持される |
+| カンバンの並び順 | `position`（整数）を列ごとに管理。Phase 1 は末尾追加のみ、Phase 2 で並べ替え時に列内を詰め直す | 1 列数百件規模なら単純な整数で十分 |
+| `loading.tsx` | ダッシュボードのみに配置 | `[projectId]` より上位に置くとストリーミングが先に始まり、`notFound()` 時に HTTP 404 を返せなくなるため（E2E で検出） |
+
+### 3.4 認証・セキュリティ設計
+
+| 対策 | 実装 |
+|---|---|
+| パスワード保存 | Better Auth 標準の scrypt ハッシュ（`accounts.password`）。平文は保存しない（統合テストで確認） |
+| セッション | DB セッション。有効期限 7 日、1 日ごとに延長。Cookie は HttpOnly（本番は Secure） |
+| ページの認証 | `proxy.ts` は Cookie の有無で `/login` へ誘導するだけ（楽観的チェック）。**実際の検証は `(app)/layout.tsx` と各ページの `requireUser()` が DB で行う** |
+| Action の認証・認可 | すべての Action で `requireActionUser()` → Zod → サービス内の `authorizeProject()` |
+| パスワード再設定 | トークン有効期限 30 分、使い捨て（使用時に削除）、**再設定時に全セッションを無効化**（`revokeSessionsOnPasswordReset: true`） |
+| 再設定メール | 本番は Resend。開発は `RESEND_API_KEY` 未設定時のみコンソールに URL を出力。**本番では URL・トークンをログに出さない**。送信は `after()` でレスポンス後に実行し、送信失敗はログのみ（利用者には常に同じ応答を返し、登録有無を推測させない） |
+| パスワード変更 | 現在のパスワードを確認し、他端末のセッションを無効化（`revokeOtherSessions`） |
+| レート制限 | Better Auth のレート制限を DB 保存で有効化（本番のみ）。ログイン 10 回/分、登録 5 回/分、再設定メール 3 回/5 分 など |
+| CSRF | Server Actions は Next.js の Origin 検証。`/api/auth/*` は Better Auth の Origin 検証（テスト環境でも有効にするため `disableOriginCheck: false` を明示） |
+| オープンリダイレクト | 再設定メールのリダイレクト先は Better Auth が信頼済みオリジンのみ許可（統合テストで確認）。ログイン後の遷移先は固定（`/dashboard`） |
+| XSS | React のエスケープに任せ、`dangerouslySetInnerHTML` は使わない。説明・コメントはプレーンテキスト |
+| SQL インジェクション | Prisma のパラメータ化クエリのみ使用（生 SQL はテストの TRUNCATE のみ） |
+| セキュリティヘッダー | `X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy`、`Permissions-Policy`。`X-Powered-By` は無効化。再設定画面は `referrer: no-referrer` |
+| 機密情報 | `.env`（Git 管理外）。`.env.example` に項目のみ記載 |
+
+### 3.5 多言語化への備え（現時点は日本語のみ）
+
+- UI 文言は `src/i18n/messages/ja.ts` に集約し、コンポーネントは `m.project.listTitle` のように参照する。英語対応時は同じ構造の `en.ts` を追加する（`Messages` 型でキーの過不足をコンパイル時に検出できる）
+- Zod のエラーメッセージも同じ辞書から参照する
+- 日付・日時・パーセントは `src/i18n/format.ts` の `Intl` ベースの関数で整形し、ロケール（`LOCALE`）とタイムゾーン（`APP_TIME_ZONE = "Asia/Tokyo"`）を一元管理する
+- 開始日・期限は時刻を持たない日付（DB は `DATE` 型）として扱い、タイムゾーンによる日付ずれを防ぐ
+- レイアウトは長い文字列でも崩れないよう `break-words` / `truncate` / `line-clamp` / `flex-wrap` を使用し、モバイル幅で横スクロールが発生しないことを E2E で確認している
+
+---
+
+## 4. データベース設計
+
+[`er-diagram.md`](./er-diagram.md) を参照。
+
+---
+
+## 5. ディレクトリ構成
+
+```
+project-management-app/
+├── .github/workflows/ci.yml          # lint / typecheck / unit / build、integration、E2E
+├── docker/postgres/init/             # ローカル DB 初期化（テスト用 DB の作成）
+├── docs/                             # 設計書・ER 図・進捗報告
+├── e2e/                              # Playwright テスト
+├── prisma/
+│   ├── schema.prisma
+│   ├── migrations/                   # Owner 整合性トリガーを含む
+│   └── seed.ts                       # 開発用サンプルデータ
+├── src/
+│   ├── app/
+│   │   ├── (auth)/                   # login / register / forgot-password / reset-password
+│   │   ├── (app)/                    # ログイン必須（サイドバーレイアウト）
+│   │   │   ├── layout.tsx            # DB でセッションを検証
+│   │   │   ├── dashboard/
+│   │   │   ├── projects/             # 一覧 / new / [projectId]（概要・settings）
+│   │   │   └── settings/             # ユーザー設定
+│   │   ├── api/auth/[...all]/route.ts
+│   │   ├── layout.tsx / page.tsx / not-found.tsx / globals.css
+│   ├── components/
+│   │   ├── ui/                       # shadcn/ui（生成物）
+│   │   ├── form/                     # RHF 用の入力部品
+│   │   └── layout/                   # サイドバー、ユーザーメニュー、テーマ切替
+│   ├── domain/                       # 純粋関数 + 単体テスト（*.test.ts）
+│   ├── features/
+│   │   ├── auth/                     # フォーム、スキーマ
+│   │   ├── projects/                 # actions / service / queries / schemas / components
+│   │   ├── tasks/                    # actions / service / queries / schemas / components
+│   │   └── settings/                 # プロフィール・パスワード変更フォーム
+│   ├── generated/prisma/             # Prisma Client（生成物・Git 管理外）
+│   ├── i18n/                         # 文言・書式
+│   ├── lib/
+│   │   ├── auth/                     # auth.ts / auth-client.ts / session.ts / authorization.ts
+│   │   ├── action-result.ts          # runAction / parseInput
+│   │   ├── db.ts / errors.ts / mail.ts / background.ts / validation.ts / form.ts
+│   └── proxy.ts
+├── tests/
+│   ├── integration/                  # 実 DB（テスト用 PostgreSQL）を使う統合テスト
+│   └── helpers/
+├── docker-compose.yml / prisma.config.ts / vitest.config.mts / playwright.config.ts
+└── .env.example
+```
+
+テストの配置:
+- 単体テスト: 対象ファイルの隣に `*.test.ts`（`src/**`）
+- 統合テスト: `tests/integration/`（サービス・Action・Better Auth をテスト用 DB に対して実行。DB はモックしない）
+- E2E: `e2e/`（本番ビルドに対して実行）
+
+---
+
+## 6. 開発フェーズごとの実装計画
+
+各フェーズ終了時に「実装内容 / 変更ファイル / テスト結果 / セキュリティ確認 / 残課題」を [progress.md](./progress.md) に記録し、確認をもらってから次へ進む。
+
+### Phase 1: 基本機能 — **完了**
+環境構築、DB（全テーブル）、認証（登録・ログイン・ログアウト・パスワード再設定・パスワード変更）、基本レイアウト（サイドバー・レスポンシブ・ダークモード）、権限判定、プロジェクト CRUD（検索・絞り込み・並べ替え・ページネーション）、タスク CRUD（一覧形式）、CI、E2E
+
+### Phase 2: 主要機能
+- カンバンボード（3 列）、dnd-kit による列内並べ替え・列間移動、楽観的更新（`useOptimistic`）
+- タスク詳細モーダル
+- 期限表示（期限切れ・期限間近の強調）
+- ダッシュボード（集計値、直近のタスク、プロジェクト別進捗率）
+- テスト: 単体（並び順計算）、統合（移動・並べ替えの整合性、同時操作、ダッシュボード集計）、E2E（カンバン操作）
+
+### Phase 3: チーム機能
+- メンバー追加（登録済みユーザーのメールアドレス指定）・一覧・削除
+- メンバー削除時の担当タスク解除（同一トランザクション）
+- コメント（投稿・表示・自分のコメントの編集・削除）
+- 更新履歴（ステータス・担当者・期限・優先度の変更をタスク更新と同一トランザクションで記録）
+- テスト: Member が Owner 専用操作をできないこと、他人のコメントを編集できないこと、Owner を削除できないこと
+
+### Phase 4: 品質向上
+- E2E 拡充（要件 7 章の全項目、パスワード再設定の通し操作）
+- エラー処理・ローディング UI の見直し、アクセシビリティ（カンバンのキーボード操作）
+- レスポンシブ・ダークモードの全画面確認
+
+### Phase 5: 公開
+- Neon 本番 DB、Vercel デプロイ（Git 連携で main への自動デプロイ）、Resend 設定
+- デモアカウント（データの定期リセット方式を検討）
+- README、ER 図、アーキテクチャ図、Server Actions 一覧（API 設計資料）
+
+---
+
+## 7. 決定事項（2026-10-30 回答）
+
+| # | 質問 | 決定 |
+|---|---|---|
+| Q1 | 認証ライブラリ | **Better Auth に変更**。メール＋パスワード、DB セッション、パスワード再設定、`revokeSessionsOnPasswordReset` を有効化 |
+| Q2 | 再設定メール | 開発: コンソールに URL を出力 / 本番: Resend。本番では URL・トークンをログに出さない。有効期限・使い捨て・送信失敗時の処理を考慮 |
+| Q3 | 英語対応 | 現時点は日本語のみ。文言・日付書式を一元管理し、将来の英語対応を妨げない（3.5） |
+| Q4 | 要件の補足（下表） | 提案どおり採用。特に Owner の存在保証、作成時のトランザクション、メンバー削除時の整合性、データ分離を重視 |
+
+### 要件の補足・解釈（Q4 で承認）
+
+| # | 項目 | 決定 |
+|---|---|---|
+| A | 再設定メール送信 | Q2 のとおり |
+| B | 再設定画面 | `/reset-password?token=...` を追加 |
+| C | メンバー追加方法 | 登録済みユーザーをメールアドレスで追加（招待メールは対象外） |
+| D | 日本語・英語 | Q3 のとおり |
+| E | Owner の管理 | `Projects.ownerId` を廃止し `ProjectMember.role = OWNER` に一本化。Owner はプロジェクトにつきちょうど 1 人（DB トリガーで保証） |
+| F | Owner の移譲・脱退 | MVP では移譲なし。Owner は削除・降格不可 |
+| G | メンバー削除時の担当タスク | 同一トランザクションで担当者を未設定に戻す（Phase 3） |
+| H | 担当者の制約 | プロジェクトのメンバーのみ（サーバー側で検証済み） |
+| I | タスク 0 件の進捗率 | 0%。小数点以下は切り捨て |
+| J | プロジェクトのステータス | タスク進捗と連動させない（手動） |
+| K | 直近のタスク | 所属プロジェクトの未完了タスクのうち期限が近い順に最大 10 件（Phase 2） |
+| L | 期限切れ判定 | 日付型で保存し、Asia/Tokyo の「今日」より前なら期限切れ（当日は含まない） |
+| M | 優先順位変更 | 優先度フィールドの変更と、列内のドラッグ並べ替えの両方 |
+| N | 同時編集 | 後勝ち。リアルタイム同期は対象外 |
+| O | `/settings` | 表示名とパスワードの変更のみ |
+| P | デモアカウント | Phase 5 で方式を決定 |
+| Q | レート制限 | 認証エンドポイントのみ（3.4） |
+| R〜S | テスト・CI・ダークモードの時期 | 各フェーズでテスト。CI・ダークモード・レスポンシブは Phase 1 で基盤を整備（実施済み） |
+| T | 本番 DB | Neon（Phase 5 で確定） |
+| U | パッケージマネージャ | npm |
