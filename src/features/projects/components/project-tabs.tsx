@@ -11,6 +11,7 @@ export function ProjectTabs({ projectId, showSettings }: { projectId: string; sh
   const tabs = [
     { href: base, label: m.project.tabs.overview },
     { href: `${base}/board`, label: m.project.tabs.board },
+    { href: `${base}/members`, label: m.project.tabs.members },
     ...(showSettings ? [{ href: `${base}/settings`, label: m.project.tabs.settings }] : []),
   ];
 

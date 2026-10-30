@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
@@ -18,13 +18,14 @@ import { m } from "@/i18n";
 import { deleteTaskAction } from "../actions";
 import type { AssignableMember, TaskListItem } from "../queries";
 import type { TaskFormValues, TaskStatusValue } from "../schemas";
+import type { TaskThread } from "../thread";
 import { TaskDetailDialog } from "./task-detail-dialog";
 import { EMPTY_TASK_VALUES, TaskFormDialog } from "./task-form-dialog";
 
+/** 詳細表示は URL の ?task=<id> で管理する（サーバーでコメント・履歴を取得するため。リンクの共有も可能） */
 export type TaskDialogState =
   | { mode: "closed" }
   | { mode: "create"; status?: TaskStatusValue }
-  | { mode: "detail"; task: TaskListItem }
   | { mode: "edit"; task: TaskListItem }
   | { mode: "delete"; task: TaskListItem };
 
@@ -41,14 +42,25 @@ function toFormValues(task: TaskListItem): TaskFormValues {
 }
 
 export function useTaskDialogs() {
+  const router = useRouter();
+  const pathname = usePathname();
   const [state, setState] = useState<TaskDialogState>({ mode: "closed" });
+  const closeDetail = () => router.replace(pathname, { scroll: false });
   return {
     state,
     setState,
     openCreate: (status?: TaskStatusValue) => setState({ mode: "create", status }),
-    openDetail: (task: TaskListItem) => setState({ mode: "detail", task }),
-    openEdit: (task: TaskListItem) => setState({ mode: "edit", task }),
-    openDelete: (task: TaskListItem) => setState({ mode: "delete", task }),
+    openDetail: (task: TaskListItem) => router.push(`${pathname}?task=${task.id}`, { scroll: false }),
+    closeDetail,
+    // 詳細から編集・削除へ進むときは詳細を閉じてから開く
+    openEdit: (task: TaskListItem) => {
+      closeDetail();
+      setState({ mode: "edit", task });
+    },
+    openDelete: (task: TaskListItem) => {
+      closeDetail();
+      setState({ mode: "delete", task });
+    },
   };
 }
 
@@ -58,11 +70,18 @@ export function TaskDialogs({
   projectId,
   members,
   today,
+  tasks,
+  thread,
+  currentUserId,
 }: {
   dialogs: ReturnType<typeof useTaskDialogs>;
   projectId: string;
   members: AssignableMember[];
   today: string;
+  tasks: TaskListItem[];
+  /** URL で選択されたタスクのコメント・履歴（未選択なら null） */
+  thread: TaskThread | null;
+  currentUserId: string;
 }) {
   const router = useRouter();
   const { state, setState } = dialogs;
@@ -85,9 +104,11 @@ export function TaskDialogs({
   return (
     <>
       <TaskDetailDialog
-        task={state.mode === "detail" ? state.task : null}
+        task={(thread && tasks.find((task) => task.id === thread.taskId)) ?? null}
+        thread={thread}
+        currentUserId={currentUserId}
         today={today}
-        onOpenChange={(open) => !open && close()}
+        onOpenChange={(open) => !open && dialogs.closeDetail()}
         onEdit={dialogs.openEdit}
         onDelete={dialogs.openDelete}
       />

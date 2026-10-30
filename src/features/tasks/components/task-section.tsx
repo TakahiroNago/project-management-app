@@ -12,6 +12,7 @@ import {
 import { m } from "@/i18n";
 import { cn } from "@/lib/utils";
 import type { AssignableMember, TaskListItem } from "../queries";
+import type { TaskThread } from "../thread";
 import { DueDate } from "./due-date";
 import { TaskDialogs, useTaskDialogs } from "./task-dialogs";
 
@@ -21,10 +22,14 @@ export function TaskSection({
   tasks,
   members,
   today,
+  thread,
+  currentUserId,
 }: {
   projectId: string;
   tasks: TaskListItem[];
   members: AssignableMember[];
+  thread: TaskThread | null;
+  currentUserId: string;
   /** アプリのタイムゾーンでの今日（"YYYY-MM-DD"）。サーバーで算出して渡す */
   today: string;
 }) {
@@ -89,7 +94,15 @@ export function TaskSection({
         </ul>
       )}
 
-      <TaskDialogs dialogs={dialogs} projectId={projectId} members={members} today={today} />
+      <TaskDialogs
+        dialogs={dialogs}
+        projectId={projectId}
+        members={members}
+        today={today}
+        tasks={tasks}
+        thread={thread}
+        currentUserId={currentUserId}
+      />
     </section>
   );
 }

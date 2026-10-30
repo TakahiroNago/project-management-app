@@ -6,6 +6,7 @@ import { todayInTimeZone } from "@/domain/dates";
 import { getProjectForUser } from "@/features/projects/queries";
 import { TaskSection } from "@/features/tasks/components/task-section";
 import { listAssignableMembers, listTasksForProject } from "@/features/tasks/queries";
+import { getTaskThread } from "@/features/tasks/thread";
 import { APP_TIME_ZONE, m } from "@/i18n";
 import { formatDate, formatDateTime, formatPercent } from "@/i18n/format";
 import { requireUser } from "@/lib/auth/session";
@@ -16,15 +17,18 @@ export async function generateMetadata({ params }: PageProps<"/projects/[project
   return { title: project?.name ?? m.errors.pageNotFound };
 }
 
-export default async function ProjectPage({ params }: PageProps<"/projects/[projectId]">) {
+export default async function ProjectPage({ params, searchParams }: PageProps<"/projects/[projectId]">) {
   const user = await requireUser();
   const { projectId } = await params;
   const project = await getProjectForUser(user.id, projectId);
   if (!project) notFound();
 
-  const [tasks, members] = await Promise.all([
+  // ?task=<id> が指定されていれば、そのタスクのコメント・履歴も取得する（詳細ダイアログ）
+  const { task: selectedTaskId } = await searchParams;
+  const [tasks, members, thread] = await Promise.all([
     listTasksForProject(user.id, project.id),
     listAssignableMembers(user.id, project.id),
+    typeof selectedTaskId === "string" ? getTaskThread(user.id, project.id, selectedTaskId) : null,
   ]);
 
   const details = [
@@ -66,6 +70,8 @@ export default async function ProjectPage({ params }: PageProps<"/projects/[proj
         projectId={project.id}
         tasks={tasks}
         members={members}
+        thread={thread}
+        currentUserId={user.id}
         today={todayInTimeZone(APP_TIME_ZONE)}
       />
     </div>

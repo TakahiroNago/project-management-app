@@ -33,6 +33,7 @@ import {
 import { moveTaskAction } from "@/features/tasks/actions";
 import { TaskDialogs, useTaskDialogs } from "@/features/tasks/components/task-dialogs";
 import type { AssignableMember, TaskListItem } from "@/features/tasks/queries";
+import type { TaskThread } from "@/features/tasks/thread";
 import { m } from "@/i18n";
 import { KanbanCard } from "./kanban-card";
 import { KanbanColumn } from "./kanban-column";
@@ -52,10 +53,14 @@ export function KanbanBoard({
   tasks,
   members,
   today,
+  thread,
+  currentUserId,
 }: {
   projectId: string;
   tasks: TaskListItem[];
   members: AssignableMember[];
+  thread: TaskThread | null;
+  currentUserId: string;
   today: string;
 }) {
   const router = useRouter();
@@ -222,7 +227,15 @@ export function KanbanBoard({
           {activeTask && <KanbanCard task={activeTask} today={today} overlay />}
         </DragOverlay>
       </DndContext>
-      <TaskDialogs dialogs={dialogs} projectId={projectId} members={members} today={today} />
+      <TaskDialogs
+        dialogs={dialogs}
+        projectId={projectId}
+        members={members}
+        today={today}
+        tasks={tasks}
+        thread={thread}
+        currentUserId={currentUserId}
+      />
     </>
   );
 }

@@ -7,33 +7,40 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
+import { CommentSection } from "@/features/comments/components/comment-section";
 import { m } from "@/i18n";
 import { formatDate, formatDateTime } from "@/i18n/format";
 import type { TaskListItem } from "../queries";
+import type { TaskThread } from "../thread";
+import { ActivityList } from "./activity-list";
 import { DueDate } from "./due-date";
 
-/** タスク詳細（閲覧用）。編集・削除は親コンポーネントのダイアログを開く */
+/** タスク詳細（項目・コメント・更新履歴）。編集・削除は親のダイアログを開く */
 export function TaskDetailDialog({
   task,
+  thread,
+  currentUserId,
   today,
   onOpenChange,
   onEdit,
   onDelete,
 }: {
   task: TaskListItem | null;
+  thread: TaskThread | null;
+  currentUserId: string;
   today: string;
   onOpenChange: (open: boolean) => void;
   onEdit: (task: TaskListItem) => void;
   onDelete: (task: TaskListItem) => void;
 }) {
   return (
-    <Dialog open={task !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-lg">
-        {task && (
+    <Dialog open={task !== null && thread !== null} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-2xl">
+        {task && thread && (
           <>
             <DialogHeader>
               <DialogTitle className="pr-6 break-words">{task.title}</DialogTitle>
@@ -65,15 +72,18 @@ export function TaskDetailDialog({
               <h3 className="text-sm text-muted-foreground">{m.task.fields.description}</h3>
               <p className="text-sm whitespace-pre-wrap break-words">{task.description || m.common.notSet}</p>
             </section>
-            <p className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">{m.task.commentsComingSoon}</p>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => onDelete(task)}>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => onDelete(task)}>
                 <Trash2 /> {m.common.delete}
               </Button>
-              <Button onClick={() => onEdit(task)}>
+              <Button size="sm" onClick={() => onEdit(task)}>
                 <Pencil /> {m.common.edit}
               </Button>
-            </DialogFooter>
+            </div>
+            <Separator />
+            <CommentSection taskId={task.id} comments={thread.comments} currentUserId={currentUserId} />
+            <Separator />
+            <ActivityList activity={thread.activity} userNames={thread.userNames} />
           </>
         )}
       </DialogContent>

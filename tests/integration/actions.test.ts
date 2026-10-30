@@ -4,6 +4,8 @@ import {
   deleteProjectAction,
   updateProjectAction,
 } from "@/features/projects/actions";
+import { createCommentAction, deleteCommentAction, updateCommentAction } from "@/features/comments/actions";
+import { addMemberAction, removeMemberAction } from "@/features/members/actions";
 import { createProject } from "@/features/projects/service";
 import {
   createTaskAction,
@@ -159,5 +161,62 @@ describe("moveTaskAction", () => {
     const task = await createTask(owner.id, project.id, taskInput());
     currentUser = await createUser();
     expect(await moveTaskAction(task.id, { status: "DONE", index: 0 })).toEqual({ ok: false, error: m.errors.notFound });
+  });
+});
+
+describe("メンバー・コメントの Action", () => {
+  async function setupTeam() {
+    const owner = await createUser("owner");
+    const member = await createUser("member");
+    const project = await createProject(owner.id, projectInput());
+    await addMember(project.id, member.id);
+    const task = await createTask(owner.id, project.id, taskInput());
+    return { owner, member, project, task };
+  }
+
+  it("未ログインでは拒否される", async () => {
+    const { project, member, task } = await setupTeam();
+    const unauthorized = { ok: false, error: m.errors.unauthorized };
+    expect(await addMemberAction(project.id, { email: "x@example.com" })).toEqual(unauthorized);
+    expect(await removeMemberAction(project.id, member.id)).toEqual(unauthorized);
+    expect(await createCommentAction(task.id, { content: "x" })).toEqual(unauthorized);
+    expect(await db.comment.count()).toBe(0);
+  });
+
+  it("Member によるメンバー追加・削除は Forbidden", async () => {
+    const { member, owner, project } = await setupTeam();
+    currentUser = member;
+    expect(await addMemberAction(project.id, { email: owner.email })).toEqual({ ok: false, error: m.errors.forbidden });
+    expect(await removeMemberAction(project.id, owner.id)).toEqual({ ok: false, error: m.errors.forbidden });
+  });
+
+  it("メールアドレス・コメントの入力検証", async () => {
+    const { owner, project, task } = await setupTeam();
+    currentUser = owner;
+    expect(await addMemberAction(project.id, { email: "not-an-email" })).toMatchObject({
+      ok: false,
+      fieldErrors: { email: [m.validation.invalidEmail] },
+    });
+    expect(await createCommentAction(task.id, { content: "   " })).toMatchObject({
+      ok: false,
+      fieldErrors: { content: [m.validation.required] },
+    });
+    expect((await createCommentAction(task.id, { content: "x".repeat(2001) })).ok).toBe(false);
+    expect(await createCommentAction(task.id, { content: "  前後の空白は除去  " })).toEqual({ ok: true, data: undefined });
+    expect(await db.comment.findFirst()).toMatchObject({ content: "前後の空白は除去" });
+  });
+
+  it("他人のコメントの編集・削除は Forbidden", async () => {
+    const { owner, member, task } = await setupTeam();
+    currentUser = member;
+    await createCommentAction(task.id, { content: "member のコメント" });
+    const comment = await db.comment.findFirstOrThrow();
+
+    currentUser = owner;
+    expect(await updateCommentAction(comment.id, { content: "x" })).toEqual({ ok: false, error: m.errors.forbidden });
+    expect(await deleteCommentAction(comment.id)).toEqual({ ok: false, error: m.errors.forbidden });
+    expect(await db.comment.findUniqueOrThrow({ where: { id: comment.id } })).toMatchObject({
+      content: "member のコメント",
+    });
   });
 });

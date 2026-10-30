@@ -18,6 +18,9 @@ export const PROJECT_PERMISSIONS = {
   "task:create": ALL,
   "task:update": ALL,
   "task:delete": ALL,
+  // コメントの編集・削除は権限ではなく「投稿者本人か」で判定する（サービス層）
+  "comment:view": ALL,
+  "comment:create": ALL,
 } as const satisfies Record<string, readonly ProjectRole[]>;
 
 export type ProjectPermission = keyof typeof PROJECT_PERMISSIONS;

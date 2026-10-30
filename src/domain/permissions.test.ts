@@ -10,6 +10,8 @@ describe("can", () => {
     "task:create",
     "task:update",
     "task:delete",
+    "comment:view",
+    "comment:create",
   ];
 
   it("権限表のすべての操作がテストで分類されている", () => {

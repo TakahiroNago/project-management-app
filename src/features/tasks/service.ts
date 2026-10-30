@@ -1,5 +1,6 @@
 import "server-only";
-import { parseDateOnly } from "@/domain/dates";
+import { type ActivityChange, diffTaskChanges, type TrackedTaskFields } from "@/domain/activity";
+import { parseDateOnly, toDateOnlyString } from "@/domain/dates";
 import type { TaskStatus } from "@/generated/prisma/client";
 import { m } from "@/i18n";
 import { authorizeProject } from "@/lib/auth/authorization";
@@ -42,7 +43,7 @@ async function assertAssigneeIsMember(tx: DbClient, projectId: string, assigneeI
  * プロジェクト行を排他ロックする。
  * 同じプロジェクトのタスクの並び順を変更する処理を直列化し、position の重複・欠番を防ぐ。
  */
-async function lockProject(tx: DbClient, projectId: string) {
+export async function lockProject(tx: DbClient, projectId: string) {
   await tx.$queryRaw`SELECT "id" FROM "projects" WHERE "id" = ${projectId} FOR UPDATE`;
 }
 
@@ -75,13 +76,42 @@ async function findTaskOrThrow(tx: DbClient, taskId: string) {
   return task;
 }
 
+/** 履歴の比較に使う形（期限は "YYYY-MM-DD"） */
+function trackedFields(task: {
+  status: string;
+  assigneeId: string | null;
+  dueDate: Date | null;
+  priority: string;
+}): TrackedTaskFields {
+  return {
+    status: task.status,
+    assigneeId: task.assigneeId,
+    dueDate: task.dueDate ? toDateOnlyString(task.dueDate) : null,
+    priority: task.priority,
+  };
+}
+
+/** 更新履歴を記録する（呼び出し元のトランザクション内で、タスクの更新と同時に確定する） */
+export async function recordActivity(
+  tx: DbClient,
+  { projectId, taskId, userId, changes }: { projectId: string; taskId: string; userId: string; changes: ActivityChange[] },
+) {
+  if (changes.length === 0) return;
+  await tx.activityLog.createMany({
+    data: changes.map((change) => ({ projectId, taskId, userId, ...change })),
+  });
+}
+
 export async function createTask(userId: string, projectId: string, input: TaskInput) {
   return db.$transaction(async (tx) => {
     await authorizeProject(tx, { projectId, userId, permission: "task:create" });
-    await assertAssigneeIsMember(tx, projectId, input.assigneeId);
+    // ロックしてから担当者を検証する（同時に行われるメンバー削除と直列化するため）
     await lockProject(tx, projectId);
+    await assertAssigneeIsMember(tx, projectId, input.assigneeId);
     const position = await tx.task.count({ where: { projectId, status: input.status } });
-    return tx.task.create({ data: { ...toTaskData(input), projectId, position } });
+    const task = await tx.task.create({ data: { ...toTaskData(input), projectId, position } });
+    await tx.activityLog.create({ data: { projectId, taskId: task.id, userId, action: "TASK_CREATED" } });
+    return task;
   });
 }
 
@@ -89,14 +119,17 @@ export async function updateTask(userId: string, taskId: string, input: TaskInpu
   return db.$transaction(async (tx) => {
     const { projectId } = await findTaskOrThrow(tx, taskId);
     await authorizeProject(tx, { projectId, userId, permission: "task:update" });
-    await assertAssigneeIsMember(tx, projectId, input.assigneeId);
     await lockProject(tx, projectId);
+    await assertAssigneeIsMember(tx, projectId, input.assigneeId);
 
     // ロック取得後の最新の状態で判定する
-    const { status } = await findTaskOrThrow(tx, taskId);
-    if (status !== input.status) {
+    const before = await tx.task.findUniqueOrThrow({
+      where: { id: taskId },
+      select: { status: true, assigneeId: true, dueDate: true, priority: true },
+    });
+    if (before.status !== input.status) {
       // ステータスが変わった場合は移動先の列の末尾に置き、移動元の列を詰める
-      const current = await loadColumns(tx, projectId, [status, input.status]);
+      const current = await loadColumns(tx, projectId, [before.status, input.status]);
       await applyPositions(
         tx,
         current,
@@ -104,13 +137,21 @@ export async function updateTask(userId: string, taskId: string, input: TaskInpu
       );
     }
 
-    return tx.task.update({ where: { id: taskId }, data: toTaskData(input) });
+    const data = toTaskData(input);
+    const task = await tx.task.update({ where: { id: taskId }, data });
+    await recordActivity(tx, {
+      projectId,
+      taskId,
+      userId,
+      changes: diffTaskChanges(trackedFields(before), trackedFields(data)),
+    });
+    return task;
   });
 }
 
 /**
  * カンバンでの移動（列内の並べ替え・列間の移動）。
- * 移動元・移動先の列の position を 0 始まりの連番に振り直す。
+ * 移動元・移動先の列の position を 0 始まりの連番に振り直す。列が変わった場合はステータス変更として履歴に残す。
  */
 export async function moveTask(userId: string, taskId: string, input: MoveTaskInput) {
   return db.$transaction(async (tx) => {
@@ -125,6 +166,14 @@ export async function moveTask(userId: string, taskId: string, input: MoveTaskIn
       current,
       moveTaskInColumns(groupIntoColumns(current), taskId, input.status, input.index),
     );
+    if (status !== input.status) {
+      await recordActivity(tx, {
+        projectId,
+        taskId,
+        userId,
+        changes: [{ action: "STATUS_CHANGED", oldValue: status, newValue: input.status }],
+      });
+    }
     return { projectId };
   });
 }
@@ -136,6 +185,7 @@ export async function deleteTask(userId: string, taskId: string) {
     await lockProject(tx, projectId);
 
     const { status } = await findTaskOrThrow(tx, taskId);
+    // コメント・履歴は外部キーの CASCADE で削除される
     await tx.task.delete({ where: { id: taskId } });
     // 削除した列を詰め直す
     const current = await loadColumns(tx, projectId, [status]);

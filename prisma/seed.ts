@@ -79,6 +79,29 @@ async function main() {
         ],
       });
 
+      // 更新履歴とコメントのサンプル（アプリ経由で作成した場合と同じ形）
+      const tasks = await tx.task.findMany({ where: { projectId: project.id }, select: { id: true, title: true } });
+      await tx.activityLog.createMany({
+        data: tasks.map((task) => ({ projectId: project.id, taskId: task.id, userId: demo.id, action: "TASK_CREATED" as const })),
+      });
+      const design = tasks.find((task) => task.title === "トップページのデザイン")!;
+      await tx.activityLog.createMany({
+        data: [
+          { projectId: project.id, taskId: design.id, userId: demo.id, action: "STATUS_CHANGED", oldValue: "TODO", newValue: "IN_PROGRESS" },
+          { projectId: project.id, taskId: design.id, userId: demo.id, action: "PRIORITY_CHANGED", oldValue: "HIGH", newValue: "URGENT" },
+        ],
+      });
+      const commentedAt = new Date();
+      await tx.comment.create({
+        data: {
+          taskId: design.id,
+          userId: member.id,
+          content: "ワイヤーフレームを確認しました。ヘッダーの構成について相談させてください。",
+          createdAt: commentedAt,
+          updatedAt: commentedAt,
+        },
+      });
+
       const personal = await tx.project.create({
         data: { name: "個人ブログ開発", status: "PLANNING", dueDate: date("2027-03-31") },
       });

@@ -1,5 +1,76 @@
 # 進捗・フェーズ報告
 
+## Phase 3: チーム機能（2026-10-30 完了）
+
+### 実装内容
+
+| 領域 | 内容 |
+|---|---|
+| メンバー管理 | `/projects/[projectId]/members`（新規画面）。全メンバーが一覧を閲覧でき、Owner のみ登録済みユーザーをメールアドレスで追加・削除できる。Owner は削除不可 |
+| メンバー削除時の整合性 | 担当タスクの未割り当て化・履歴の記録・メンバーシップの削除を 1 トランザクションで実行。プロジェクト行のロックにより、同時に行われる担当者の設定と直列化 |
+| 担当者設定 | 追加したメンバーを担当者に設定可能（メンバー以外は従来どおりサーバー側で拒否） |
+| コメント | タスク詳細で投稿・表示。自分のコメントのみ編集・削除（削除は確認ダイアログ）。編集済みの表示 |
+| 更新履歴 | タスク作成・ステータス・担当者・期限・優先度の変更を、誰が・いつ・何から何に変えたかで記録・表示（新しい順、最大 50 件）。カンバンの列移動も記録 |
+| タスク詳細 | URL の `?task=<id>` で開く方式に変更（コメント・履歴をサーバーで取得。リンク共有が可能、Esc で閉じると URL からも消える） |
+| デモデータ | シードに更新履歴とコメントを追加 |
+
+### 主な変更ファイル
+
+```
+追加  src/domain/activity.ts (+ test)
+      src/features/members/{actions,service,queries,schemas}.ts, components/{add-member-form,remove-member-button}.tsx
+      src/features/comments/{actions,service,schemas}.ts, components/comment-section.tsx
+      src/features/tasks/thread.ts, components/activity-list.tsx
+      src/app/(app)/projects/[projectId]/members/page.tsx
+      tests/integration/{members,comments-activity}.test.ts, e2e/team.spec.ts
+変更  src/features/tasks/service.ts            履歴の記録、ロック取得の順序（ロック → 担当者検証）
+      src/features/tasks/components/{task-dialogs,task-detail-dialog,task-section}.tsx  URL 方式の詳細
+      src/features/board/components/kanban-board.tsx
+      src/app/(app)/projects/[projectId]/{page,board/page}.tsx  ?task の読み込み
+      src/domain/permissions.ts (+ test)       comment:view / comment:create
+      src/features/projects/components/project-tabs.tsx  「メンバー」タブ
+      src/i18n/messages/ja.ts, prisma/seed.ts, tests/integration/actions.test.ts
+      README.md, docs/{design,er-diagram,progress}.md
+```
+
+### テスト結果（2026-10-30、ローカル）
+
+| 種別 | 結果 |
+|---|---|
+| ESLint / 型チェック / ビルド | エラー 0 / エラー 0 / 成功 |
+| 単体テスト | **64 件成功**（+7：履歴の差分算出、コメント権限） |
+| 統合テスト | **84 件成功**（+20：メンバーの追加・削除と権限、同時追加の重複防止、削除時の担当解除と履歴、削除と担当者設定の並行実行、コメントの投稿・編集・削除の権限、更新履歴の内容と同一トランザクション性、各 Action の認証・入力検証） |
+| E2E | **17 件成功**（+2：Owner と Member の 2 ユーザーでの一連の操作、タスク詳細 URL の共有と他プロジェクトのタスク ID の拒否）。全件を 2 回連続で実行して安定を確認 |
+| 依存の脆弱性 | `npm audit --omit=dev` 0 件 |
+
+### セキュリティ確認
+
+| 項目 | 状態 |
+|---|---|
+| 新しい Server Action（メンバー追加・削除、コメント投稿・編集・削除） | すべて認証 → Zod → サービス内で認可。未ログイン・権限不足・不正入力をテスト済み |
+| メンバー管理の権限 | Owner のみ（Member は Forbidden、メンバー外は NotFound）。Owner の削除は不可（DB トリガーでも保証） |
+| コメントの権限 | 投稿者本人のみ編集・削除可（Owner でも他人のコメントは不可） |
+| 削除されたメンバー | 直後からプロジェクト・タスク・コメントにアクセスできない（統合テスト・E2E） |
+| タスク詳細の URL | `?task` に他プロジェクトのタスク ID を指定しても、そのプロジェクトに属さないため表示しない |
+| XSS | コメントはプレーンテキストとして表示（React のエスケープ。改行は CSS で表示） |
+
+### 実装中に判明し対応した点
+
+- **「編集済み」が表示されないことがある**: 作成日時と更新日時の差が 1 秒以上かで判定していたため、作成直後の編集が反映されなかった（E2E で検出）。作成時に両者を同じ値で保存し、「更新日時 > 作成日時」で判定するように修正
+- **担当者の検証とロックの順序**: Phase 2 では担当者を検証してからロックしていたため、メンバー削除と競合する余地があった。ロック → 検証の順に変更し、並行実行テストを追加
+
+### 残課題・次フェーズへの申し送り
+
+| # | 内容 | 対応予定 |
+|---|---|---|
+| 1 | メンバー追加時、Owner はメールアドレスが登録済みかどうかを知ることができる（「見つかりません」と表示するため）。招待方式でない MVP では必要な表示 | 要件外（招待メール方式にする場合は相談） |
+| 2 | 更新履歴は 1 タスク 50 件まで表示（それ以前は表示しない） | 必要なら Phase 4 でページ送り |
+| 3 | Owner の移譲・Member の自主的な脱退は未対応（設計どおり。2.3 F） | 対象外 |
+| 4 | タッチ操作の実機確認、パスワード再設定の通し E2E、レート制限の自動テスト、GitHub Actions の実行 | Phase 4 |
+| 5 | 本番環境（DB・Vercel・Resend）、デモアカウント | Phase 5 |
+
+---
+
 ## Phase 2: 主要機能（2026-10-30 完了）
 
 ### 実装内容

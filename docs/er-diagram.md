@@ -155,6 +155,18 @@ erDiagram
 | ActivityLog | `INDEX(taskId, createdAt)` | タスク詳細の履歴 |
 | ActivityLog | `INDEX(projectId, createdAt)` | プロジェクト単位の履歴 |
 
+## ActivityLog の値の形式
+
+| action | oldValue / newValue |
+|---|---|
+| TASK_CREATED | なし |
+| STATUS_CHANGED | `TODO` / `IN_PROGRESS` / `DONE` |
+| PRIORITY_CHANGED | `LOW` / `MEDIUM` / `HIGH` / `URGENT` |
+| DUE_DATE_CHANGED | `YYYY-MM-DD`（未設定は null） |
+| ASSIGNEE_CHANGED | ユーザー ID（未設定は null）。表示時にユーザー名を解決する |
+
+記録は対象の更新と同一トランザクションで行う（タスク更新・カンバンの列移動・メンバー削除に伴う担当解除）。
+
 ## Owner の整合性（DB トリガー）
 
 「すべてのプロジェクトに OWNER がちょうど 1 人存在する」を、アプリのトランザクションに加えて DB でも保証する
