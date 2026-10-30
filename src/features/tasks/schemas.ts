@@ -32,3 +32,11 @@ export const taskInputSchema = z
 
 export type TaskInput = z.output<typeof taskInputSchema>;
 export type TaskFormValues = z.input<typeof taskInputSchema>;
+
+/** カンバンでの移動先（列と、列内の 0 始まりの位置） */
+export const moveTaskInputSchema = z.object({
+  status: z.enum(TASK_STATUSES, { error: m.validation.invalidOption }),
+  index: z.number().int().min(0).max(100_000),
+});
+
+export type MoveTaskInput = z.output<typeof moveTaskInputSchema>;

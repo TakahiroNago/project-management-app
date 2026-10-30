@@ -101,8 +101,21 @@ export const ja = {
   dashboard: {
     title: "ダッシュボード",
     welcome: (name: string) => `ようこそ、${name} さん`,
-    comingSoon: "集計とグラフは Phase 2 で追加予定です。",
-    toProjects: "プロジェクト一覧へ",
+    toProjects: "すべてのプロジェクト",
+    stats: {
+      label: "概要",
+      totalProjects: "プロジェクト",
+      inProgressProjects: "進行中のプロジェクト",
+      completedProjects: "完了したプロジェクト",
+      openTasks: "未完了のタスク",
+      overdueTasks: "期限切れのタスク",
+    },
+    recentTasks: "直近のタスク",
+    recentTasksDescription: "未完了で期限が近い順（期限切れを含む）",
+    noRecentTasks: "期限が設定された未完了のタスクはありません",
+    projectProgress: "プロジェクトの進捗",
+    noProjects: "プロジェクトがありません",
+    createFirst: "プロジェクトを作成",
   },
   project: {
     listTitle: "プロジェクト",
@@ -140,6 +153,7 @@ export const ja = {
     tabs: {
       label: "プロジェクトメニュー",
       overview: "概要",
+      board: "ボード",
       settings: "設定",
     },
     settingsTitle: "プロジェクト設定",
@@ -181,6 +195,26 @@ export const ja = {
     },
     unassigned: "未割り当て",
     overdue: "期限切れ",
+    due: {
+      overdue: (days: number) => `期限切れ（${days}日超過）`,
+      today: "今日が期限",
+      soon: (days: number) => `あと${days}日`,
+    },
+    detailTitle: "タスクの詳細",
+    openDetail: (title: string) => `タスク「${title}」の詳細を開く`,
+    commentsComingSoon: "コメント・更新履歴は Phase 3 で追加予定です。",
+    moved: "タスクを移動しました",
+    boardEmptyColumn: "タスクはありません",
+    boardHint: "カードをドラッグして移動できます。キーボードではカードにフォーカスしてスペースキーで持ち上げ、矢印キーで移動、スペースキーで確定、Esc で取り消します。",
+    dnd: {
+      pickedUp: (title: string, column: string, position: number) =>
+        `タスク「${title}」を持ち上げました（${column}、${position}番目）`,
+      movedOver: (title: string, column: string, position: number) =>
+        `タスク「${title}」を${column}の${position}番目に移動中`,
+      dropped: (title: string, column: string, position: number) =>
+        `タスク「${title}」を${column}の${position}番目に移動しました`,
+      cancelled: (title: string) => `タスク「${title}」の移動を取り消しました`,
+    },
     created: "タスクを作成しました",
     updated: "タスクを更新しました",
     deleted: "タスクを削除しました",

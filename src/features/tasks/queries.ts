@@ -7,7 +7,7 @@ export async function listTasksForProject(userId: string, projectId: string) {
   await authorizeProject(db, { projectId, userId, permission: "task:view" });
   return db.task.findMany({
     where: { projectId },
-    orderBy: [{ status: "asc" }, { position: "asc" }, { createdAt: "asc" }],
+    orderBy: [{ status: "asc" }, { position: "asc" }, { createdAt: "asc" }, { id: "asc" }],
     select: {
       id: true,
       title: true,
@@ -16,6 +16,9 @@ export async function listTasksForProject(userId: string, projectId: string) {
       priority: true,
       startDate: true,
       dueDate: true,
+      position: true,
+      createdAt: true,
+      updatedAt: true,
       assignee: { select: { id: true, name: true } },
     },
   });

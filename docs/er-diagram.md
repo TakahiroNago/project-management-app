@@ -171,5 +171,5 @@ erDiagram
 - プロジェクト作成と OWNER 登録は同一トランザクション（`createProject`）
 - `Task.assigneeId` はそのプロジェクトのメンバーであること（`assertAssigneeIsMember`）
 - メンバー削除時、そのメンバーの担当タスクの `assigneeId` を null に戻す（同一トランザクション）
-- `Task.position` は (projectId, status) 内で 0 始まりの連番（移動時にトランザクションで詰め直す）
+- `Task.position` は (projectId, status) 内で 0 始まりの連番。作成・移動・ステータス変更・削除時に、プロジェクト行をロック（`SELECT ... FOR UPDATE`）したトランザクション内で詰め直す。一時的に同じ値を取り得るため DB の UNIQUE 制約は付けていない
 - `startDate <= dueDate`（Zod で検証）

@@ -34,7 +34,7 @@ describe("タスクの作成・更新・削除", () => {
     expect(await db.task.count()).toBe(0);
   });
 
-  it("新しいタスクは列の末尾に追加され、ステータス変更時は移動先の列の末尾に置かれる", async () => {
+  it("新しいタスクは列の末尾に追加され、ステータス変更時は移動先の列の末尾に置かれ移動元は詰められる", async () => {
     const { owner, project } = await setup();
     const a = await createTask(owner.id, project.id, taskInput({ title: "A" }));
     const b = await createTask(owner.id, project.id, taskInput({ title: "B" }));
@@ -42,10 +42,10 @@ describe("タスクの作成・更新・削除", () => {
     expect([a.position, b.position, done.position]).toEqual([0, 1, 0]);
 
     const moved = await updateTask(owner.id, a.id, taskInput({ title: "A", status: "DONE" }));
-    expect(moved.position).toBe(1);
+    expect(moved).toMatchObject({ status: "DONE", position: 1 });
 
     const unchanged = await updateTask(owner.id, b.id, taskInput({ title: "B2" }));
-    expect(unchanged.position).toBe(1);
+    expect(unchanged.position).toBe(0);
   });
 
   it("担当者にプロジェクト外のユーザーは指定できない", async () => {

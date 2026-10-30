@@ -5,7 +5,12 @@ import {
   updateProjectAction,
 } from "@/features/projects/actions";
 import { createProject } from "@/features/projects/service";
-import { createTaskAction, deleteTaskAction, updateTaskAction } from "@/features/tasks/actions";
+import {
+  createTaskAction,
+  deleteTaskAction,
+  moveTaskAction,
+  updateTaskAction,
+} from "@/features/tasks/actions";
 import { createTask } from "@/features/tasks/service";
 import { m } from "@/i18n";
 import { type CurrentUser } from "@/lib/auth/session";
@@ -39,6 +44,7 @@ describe("未ログイン", () => {
     expect(await createTaskAction(project.id, taskInput())).toEqual(unauthorized);
     expect(await updateTaskAction(task.id, taskInput({ title: "x" }))).toEqual(unauthorized);
     expect(await deleteTaskAction(task.id)).toEqual(unauthorized);
+    expect(await moveTaskAction(task.id, { status: "DONE", index: 0 })).toEqual(unauthorized);
 
     expect(await db.project.findMany()).toEqual([expect.objectContaining({ name: "元" })]);
     expect(await db.task.count()).toBe(1);
@@ -122,5 +128,36 @@ describe("認可エラーのメッセージ", () => {
     currentUser = await createUser();
     const result = await createProjectAction(projectInput({ name: "OK" }));
     expect(result).toEqual({ ok: true, data: { id: expect.any(String) } });
+  });
+});
+
+describe("moveTaskAction", () => {
+  it("移動先の検証（不正なステータス・負の位置・小数）", async () => {
+    const owner = await createUser();
+    currentUser = owner;
+    const project = await createProject(owner.id, projectInput());
+    const task = await createTask(owner.id, project.id, taskInput());
+
+    for (const input of [
+      { status: "ARCHIVED", index: 0 },
+      { status: "DONE", index: -1 },
+      { status: "DONE", index: 1.5 },
+      { status: "DONE" },
+      null,
+    ]) {
+      expect((await moveTaskAction(task.id, input)).ok).toBe(false);
+    }
+    expect(await db.task.findUniqueOrThrow({ where: { id: task.id } })).toMatchObject({ status: "TODO" });
+
+    expect(await moveTaskAction(task.id, { status: "DONE", index: 0 })).toEqual({ ok: true, data: undefined });
+    expect(await db.task.findUniqueOrThrow({ where: { id: task.id } })).toMatchObject({ status: "DONE", position: 0 });
+  });
+
+  it("メンバー外のユーザーは移動できない（NotFound）", async () => {
+    const owner = await createUser();
+    const project = await createProject(owner.id, projectInput());
+    const task = await createTask(owner.id, project.id, taskInput());
+    currentUser = await createUser();
+    expect(await moveTaskAction(task.id, { status: "DONE", index: 0 })).toEqual({ ok: false, error: m.errors.notFound });
   });
 });

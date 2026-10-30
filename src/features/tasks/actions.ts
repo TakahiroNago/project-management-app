@@ -4,8 +4,8 @@ import { revalidatePath } from "next/cache";
 import { type ActionResult, parseInput, runAction } from "@/lib/action-result";
 import { requireActionUser } from "@/lib/auth/session";
 import { idSchema } from "@/lib/validation";
-import { taskInputSchema } from "./schemas";
-import { createTask, deleteTask, updateTask } from "./service";
+import { moveTaskInputSchema, taskInputSchema } from "./schemas";
+import { createTask, deleteTask, moveTask, updateTask } from "./service";
 
 function revalidateProject(projectId: string) {
   revalidatePath(`/projects/${projectId}`, "layout");
@@ -38,6 +38,17 @@ export async function deleteTaskAction(taskId: unknown): Promise<ActionResult> {
     const user = await requireActionUser();
     const id = parseInput(idSchema, taskId);
     const { projectId } = await deleteTask(user.id, id);
+    revalidateProject(projectId);
+  });
+}
+
+/** カンバンでのドラッグ＆ドロップによる移動 */
+export async function moveTaskAction(taskId: unknown, input: unknown): Promise<ActionResult> {
+  return runAction(async () => {
+    const user = await requireActionUser();
+    const id = parseInput(idSchema, taskId);
+    const data = parseInput(moveTaskInputSchema, input);
+    const { projectId } = await moveTask(user.id, id, data);
     revalidateProject(projectId);
   });
 }

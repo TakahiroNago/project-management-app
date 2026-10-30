@@ -37,6 +37,30 @@ export function todayInTimeZone(timeZone: string, now: Date = new Date()): strin
   }).format(now);
 }
 
+/** 期限間近とみなす日数（今日を含めて 3 日後まで） */
+export const DUE_SOON_DAYS = 3;
+
+export type DueState = "none" | "done" | "overdue" | "today" | "soon" | "later";
+
+/** "YYYY-MM-DD" 同士の日数差（to - from） */
+export function daysBetween(from: string, to: string): number {
+  return Math.round((parseDateOnly(to).getTime() - parseDateOnly(from).getTime()) / 86_400_000);
+}
+
+/**
+ * 期限の状態。
+ * - overdue: 期限が今日より前（未完了） / today: 今日が期限 / soon: DUE_SOON_DAYS 日以内
+ */
+export function getDueState(dueDate: Date | null | undefined, isDone: boolean, today: string): DueState {
+  if (!dueDate) return "none";
+  if (isDone) return "done";
+  const days = daysBetween(today, toDateOnlyString(dueDate));
+  if (days < 0) return "overdue";
+  if (days === 0) return "today";
+  if (days <= DUE_SOON_DAYS) return "soon";
+  return "later";
+}
+
 /**
  * 期限切れか（期限が「今日」より前で、かつ未完了）。
  * 期限当日は期限切れではない。

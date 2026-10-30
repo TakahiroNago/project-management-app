@@ -10,7 +10,7 @@ test("他のユーザーのプロジェクトは一覧に表示されず、URL �
   await page.goto("/projects");
   await expect(page.getByText("E2E アリスの非公開プロジェクト")).toHaveCount(0);
 
-  for (const url of [projectUrl, `${projectUrl}/settings`]) {
+  for (const url of [projectUrl, `${projectUrl}/board`, `${projectUrl}/settings`]) {
     const response = await page.goto(url);
     expect(response?.status()).toBe(404);
     await expect(page.getByRole("heading", { name: "ページが見つかりません" })).toBeVisible();
