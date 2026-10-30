@@ -1,6 +1,6 @@
 # ProjectFlow 設計書
 
-> 初版: 2026-10-30 / 最終更新: 2026-10-30（Phase 3 完了時点）
+> 初版: 2026-10-30 / 最終更新: 2026-10-31（Phase 4 完了時点）
 > 対象: 要件定義書「プロジェクト管理アプリ 要件定義書」
 > ステータス: **確定**（確認事項 Q1〜Q4 は 2026-10-30 に回答済み。「7. 決定事項」参照）
 
@@ -145,12 +145,12 @@ flowchart LR
 | パスワード再設定 | トークン有効期限 30 分、使い捨て（使用時に削除）、**再設定時に全セッションを無効化**（`revokeSessionsOnPasswordReset: true`） |
 | 再設定メール | 本番は Resend。開発は `RESEND_API_KEY` 未設定時のみコンソールに URL を出力。**本番では URL・トークンをログに出さない**。送信は `after()` でレスポンス後に実行し、送信失敗はログのみ（利用者には常に同じ応答を返し、登録有無を推測させない） |
 | パスワード変更 | 現在のパスワードを確認し、他端末のセッションを無効化（`revokeOtherSessions`） |
-| レート制限 | Better Auth のレート制限を DB 保存で有効化（本番のみ）。ログイン 10 回/分、登録 5 回/分、再設定メール 3 回/5 分 など |
+| レート制限 | Better Auth のレート制限を DB 保存で有効化（本番のみ）。ログイン 10 回/分、登録 5 回/分、再設定メール 3 回/5 分 など（`AUTH_RATE_LIMIT_RULES`）。IP アドレス単位で、IP は `X-Forwarded-For` から取得するため、**この値をプラットフォームが上書きする環境（Vercel 等）で動かすことが前提** |
 | CSRF | Server Actions は Next.js の Origin 検証。`/api/auth/*` は Better Auth の Origin 検証（テスト環境でも有効にするため `disableOriginCheck: false` を明示） |
 | オープンリダイレクト | 再設定メールのリダイレクト先は Better Auth が信頼済みオリジンのみ許可（統合テストで確認）。ログイン後の遷移先は固定（`/dashboard`） |
-| XSS | React のエスケープに任せ、`dangerouslySetInnerHTML` は使わない。説明・コメントはプレーンテキスト |
+| XSS | React のエスケープに任せ、`dangerouslySetInnerHTML` は使わない。説明・コメントはプレーンテキスト。加えて **nonce 付きの Content-Security-Policy**（`proxy.ts`）で、nonce のないスクリプト・インラインのイベントハンドラを実行させない（`script-src self nonce-… strict-dynamic`）。スタイルは Radix UI / dnd-kit が SSR で style 属性を出力するため `unsafe-inline` を許可 |
 | SQL インジェクション | Prisma のパラメータ化クエリのみ使用（生 SQL はテストの TRUNCATE のみ） |
-| セキュリティヘッダー | `X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy`、`Permissions-Policy`。`X-Powered-By` は無効化。再設定画面は `referrer: no-referrer` |
+| セキュリティヘッダー | CSP（上記、`frame-ancestors none` / `object-src none` / `base-uri self` / `form-action self`）、`X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy`、`Permissions-Policy`。`X-Powered-By` は無効化。再設定画面は `referrer: no-referrer` |
 | 機密情報 | `.env`（Git 管理外）。`.env.example` に項目のみ記載 |
 
 ### 3.5 多言語化への備え（現時点は日本語のみ）
@@ -162,6 +162,16 @@ flowchart LR
 - レイアウトは長い文字列でも崩れないよう `break-words` / `truncate` / `line-clamp` / `flex-wrap` を使用し、モバイル幅で横スクロールが発生しないことを E2E で確認している
 
 ---
+
+### 3.6 テスト方針
+
+| 層 | ツール | 対象 |
+|---|---|---|
+| 単体 | Vitest（`src/**/*.test.ts`） | ドメインの純粋関数、Server Action の共通処理、メール送信（ログに URL を出さないこと）、CSP の組み立て、書式 |
+| 統合 | Vitest + 実 PostgreSQL（`tests/integration`） | サービス・Server Action・Better Auth を実 DB に対して実行。認可・データ分離・トランザクション・同時実行・レート制限（本番と同じルール） |
+| E2E | Playwright（`e2e`、本番ビルド） | 要件 7 章の全項目、パスワード再設定の通し操作、カンバン（マウス / キーボード / タッチ）、スマートフォン表示、CSP、**axe-core による WCAG 2.1 AA の自動チェック（全主要画面 × ライト / ダーク）** |
+
+カバレッジは `npm run test:coverage`（UI は E2E で確認するため対象外）。E2E は不安定なテストを残さないよう、変更時に複数回連続で実行して確認する。
 
 ## 4. データベース設計
 
@@ -247,7 +257,7 @@ project-management-app/
 - 更新履歴（ステータス・担当者・期限・優先度の変更をタスク更新と同一トランザクションで記録）
 - テスト: Member が Owner 専用操作をできないこと、他人のコメントを編集できないこと、Owner を削除できないこと
 
-### Phase 4: 品質向上
+### Phase 4: 品質向上 — **完了**（2026-10-31）
 - E2E 拡充（要件 7 章の全項目、パスワード再設定の通し操作）
 - エラー処理・ローディング UI の見直し、アクセシビリティ（カンバンのキーボード操作）
 - レスポンシブ・ダークモードの全画面確認

@@ -18,6 +18,9 @@ async function addTask(page: Page, status: "TODO" | "IN_PROGRESS" | "DONE", titl
 
 /** マウスでドラッグ＆ドロップする（dnd-kit は 6px 以上動かすとドラッグ開始） */
 async function dragTo(page: Page, source: Locator, target: Locator, position: "center" | "top" = "center") {
+  // ストリーミング中は隠し要素として先に挿入されるため、表示されるのを待ってから位置を取る
+  await expect(source).toBeVisible();
+  await expect(target).toBeVisible();
   const from = (await source.boundingBox())!;
   const to = (await target.boundingBox())!;
   const startX = from.x + from.width / 2;
@@ -72,7 +75,7 @@ test("キーボードだけでカードを別の列へ移動できる", async ({
 
   // 各操作はスクリーンリーダー向けの読み上げで完了を確認してから次へ進む
   const announcer = page.getByRole("status").filter({ hasText: "キーボードで移動" });
-  await card(page, "キーボードで移動").focus();
+  await page.getByRole("button", { name: "タスク「キーボードで移動」を移動" }).focus();
   await page.keyboard.press("Space");
   await expect(announcer).toContainText(/持ち上げました（未着手、1番目）|未着手の1番目に移動中/);
   await page.keyboard.press("ArrowRight");

@@ -202,6 +202,8 @@ export const ja = {
       soon: (days: number) => `あと${days}日`,
     },
     detailTitle: "タスクの詳細",
+    dragHandle: (title: string) => `タスク「${title}」を移動`,
+    dragRole: "ドラッグ可能",
     openDetail: (title: string) => `タスク「${title}」の詳細を開く`,
     moved: "タスクを移動しました",
     boardEmptyColumn: "タスクはありません",

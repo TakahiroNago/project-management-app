@@ -13,6 +13,13 @@ const alias = {
 export default defineConfig({
   resolve: { alias },
   test: {
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.{ts,tsx}"],
+      // UI（shadcn の生成物・画面）は E2E で確認するため、単体・統合テストのカバレッジ対象から外す
+      exclude: ["src/generated/**", "src/components/**", "src/app/**", "src/**/components/**", "src/hooks/**", "src/**/*.test.ts"],
+      reporter: ["text-summary", "text", "html"],
+    },
     projects: [
       {
         resolve: { alias },

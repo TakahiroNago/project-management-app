@@ -34,7 +34,13 @@ export function StatTiles({ stats }: { stats: DashboardData["stats"] }) {
             tile.warning && "border-destructive/40 bg-destructive/5",
           )}
         >
-          <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <dt
+            className={cn(
+              "flex items-center gap-1.5 text-xs",
+              // 色付き背景の上ではコントラスト確保のため本文色にする
+              tile.warning ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
             {tile.warning && <AlertTriangle className="size-3.5 text-destructive" aria-hidden />}
             {tile.label}
           </dt>

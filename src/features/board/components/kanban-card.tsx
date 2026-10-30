@@ -1,8 +1,9 @@
 "use client";
 
+import type { DraggableAttributes } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { User } from "lucide-react";
+import { GripVertical, User } from "lucide-react";
 import { PriorityBadge } from "@/components/status-badges";
 import { DueDate } from "@/features/tasks/components/due-date";
 import type { TaskListItem } from "@/features/tasks/queries";
@@ -15,9 +16,17 @@ type CardProps = {
   /** ドラッグ中に指に追従する表示（DragOverlay） */
   overlay?: boolean;
   onOpen?: () => void;
+  /** キーボード・スクリーンリーダー向けのドラッグハンドル（要素の登録関数と属性） */
+  handleRef?: (element: HTMLElement | null) => void;
+  handleAttributes?: DraggableAttributes;
 };
 
-export function KanbanCard({ task, today, overlay, onOpen }: CardProps) {
+/**
+ * カンバンのカード。
+ * 操作できる要素はドラッグハンドルとタスク名（詳細を開く）の 2 つで、入れ子にしない。
+ * マウス・タッチではカード全体をドラッグできる（リスナーは親の SortableKanbanCard に設定）。
+ */
+export function KanbanCard({ task, today, overlay, onOpen, handleRef, handleAttributes }: CardProps) {
   return (
     <div
       className={cn(
@@ -25,23 +34,37 @@ export function KanbanCard({ task, today, overlay, onOpen }: CardProps) {
         overlay && "cursor-grabbing shadow-lg ring-2 ring-ring/30",
       )}
     >
-      <div className="flex items-start justify-between gap-2">
+      <div className="flex items-start gap-1">
+        {handleAttributes ? (
+          <button
+            ref={handleRef}
+            type="button"
+            {...handleAttributes}
+            aria-label={m.task.dragHandle(task.title)}
+            aria-roledescription={m.task.dragRole}
+            className="-ml-1.5 shrink-0 cursor-grab rounded p-0.5 text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          >
+            <GripVertical className="size-4" aria-hidden />
+          </button>
+        ) : (
+          <GripVertical className="-ml-1.5 size-5 shrink-0 p-0.5 text-muted-foreground" aria-hidden />
+        )}
         {onOpen ? (
           <button
             type="button"
             onClick={onOpen}
-            // カード本体のキーボード操作（ドラッグ開始）と競合しないようにする
+            // カードに設定したキーボード操作（ドラッグ開始）と競合しないようにする
             onKeyDown={(event) => event.stopPropagation()}
             aria-label={m.task.openDetail(task.title)}
             className={cn(
-              "min-w-0 text-left font-medium break-words hover:underline focus-visible:underline focus-visible:outline-none",
+              "min-w-0 flex-1 text-left font-medium break-words hover:underline focus-visible:underline focus-visible:outline-none",
               task.status === "DONE" && "text-muted-foreground line-through",
             )}
           >
             {task.title}
           </button>
         ) : (
-          <span className="min-w-0 font-medium break-words">{task.title}</span>
+          <span className="min-w-0 flex-1 font-medium break-words">{task.title}</span>
         )}
         <PriorityBadge priority={task.priority} />
       </div>
@@ -56,8 +79,9 @@ export function KanbanCard({ task, today, overlay, onOpen }: CardProps) {
   );
 }
 
-export function SortableKanbanCard({ task, today, onOpen }: Omit<CardProps, "overlay">) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
+export function SortableKanbanCard({ task, today, onOpen }: Omit<CardProps, "overlay" | "handleRef" | "handleAttributes">) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } =
+    useSortable({ id: task.id });
 
   return (
     <div
@@ -65,16 +89,17 @@ export function SortableKanbanCard({ task, today, onOpen }: Omit<CardProps, "ove
       style={{ transform: CSS.Translate.toString(transform), transition }}
       data-testid="kanban-card"
       data-task-title={task.title}
-      className={cn(
-        "cursor-grab touch-manipulation rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-        isDragging && "opacity-40",
-      )}
-      {...attributes}
+      className={cn("cursor-grab touch-manipulation rounded-lg", isDragging && "opacity-40")}
+      // マウス・タッチ・キーボードのリスナーはカード全体に設定する（キー操作はハンドルから伝わる）
       {...listeners}
-      aria-roledescription="draggable"
-      aria-label={task.title}
     >
-      <KanbanCard task={task} today={today} onOpen={onOpen} />
+      <KanbanCard
+        task={task}
+        today={today}
+        onOpen={onOpen}
+        handleRef={setActivatorNodeRef}
+        handleAttributes={attributes}
+      />
     </div>
   );
 }

@@ -10,6 +10,24 @@ import { sendPasswordResetEmail } from "@/lib/mail";
 /** パスワード再設定トークンの有効期限（秒） */
 export const RESET_PASSWORD_TOKEN_EXPIRES_IN = 60 * 30;
 
+/** 認証エンドポイントごとのレート制限（window 秒あたり max 回。IP アドレス単位） */
+export const AUTH_RATE_LIMIT_RULES = {
+  "/sign-in/email": { window: 60, max: 10 },
+  "/sign-up/email": { window: 60, max: 5 },
+  "/request-password-reset": { window: 60 * 5, max: 3 },
+  "/reset-password": { window: 60 * 5, max: 10 },
+  "/change-password": { window: 60, max: 5 },
+};
+
+/**
+ * レート制限を有効にするか。本番ビルドでのみ有効。
+ * E2E テスト（短時間に多数のユーザーを登録する）でのみ DISABLE_AUTH_RATE_LIMIT=true で無効化する
+ * （本番環境には設定しないこと）。
+ */
+export function isAuthRateLimitEnabled(env: { NODE_ENV?: string; DISABLE_AUTH_RATE_LIMIT?: string }) {
+  return env.NODE_ENV === "production" && env.DISABLE_AUTH_RATE_LIMIT !== "true";
+}
+
 export const auth = betterAuth({
   appName: "ProjectFlow",
   database: prismaAdapter(db, { provider: "postgresql" }),
@@ -33,20 +51,11 @@ export const auth = betterAuth({
     updateAge: 60 * 60 * 24, // 1 日ごとに有効期限を延長
   },
 
-  // 総当たり攻撃対策。サーバーレスでもインスタンス間で共有できるよう DB に保存する。
-  // 本番ビルドでのみ有効。E2E テスト（短時間に多数のユーザーを登録する）でのみ
-  // DISABLE_AUTH_RATE_LIMIT=true で無効化する（本番環境には設定しないこと）
+  // 総当たり攻撃対策。サーバーレスでもインスタンス間で共有できるよう DB に保存する
   rateLimit: {
-    enabled:
-      process.env.NODE_ENV === "production" && process.env.DISABLE_AUTH_RATE_LIMIT !== "true",
+    enabled: isAuthRateLimitEnabled(process.env),
     storage: "database",
-    customRules: {
-      "/sign-in/email": { window: 60, max: 10 },
-      "/sign-up/email": { window: 60, max: 5 },
-      "/request-password-reset": { window: 60 * 5, max: 3 },
-      "/reset-password": { window: 60 * 5, max: 10 },
-      "/change-password": { window: 60, max: 5 },
-    },
+    customRules: AUTH_RATE_LIMIT_RULES,
   },
 
   advanced: {
