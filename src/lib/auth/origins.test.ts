@@ -6,10 +6,10 @@ describe("resolveAuthOrigins", () => {
     expect(
       resolveAuthOrigins({
         VERCEL_ENV: "production",
-        BETTER_AUTH_URL: "https://projects.art-full-stack.com",
+        BETTER_AUTH_URL: "https://projectflow.art-full-stack.com",
         VERCEL_URL: "projectflow-abc123-team.vercel.app",
       }),
-    ).toEqual({ baseURL: "https://projects.art-full-stack.com", trustedOrigins: [] });
+    ).toEqual({ baseURL: "https://projectflow.art-full-stack.com", trustedOrigins: [] });
   });
 
   it("ローカルは BETTER_AUTH_URL を使う", () => {
@@ -42,7 +42,7 @@ describe("resolveAuthOrigins", () => {
   it("Preview では BETTER_AUTH_URL（本番 URL）が設定されていても使わず、ワイルドカードも含めない", () => {
     const { baseURL, trustedOrigins } = resolveAuthOrigins({
       VERCEL_ENV: "preview",
-      BETTER_AUTH_URL: "https://projects.art-full-stack.com",
+      BETTER_AUTH_URL: "https://projectflow.art-full-stack.com",
       VERCEL_URL: "projectflow-abc123-team.vercel.app",
     });
     expect(baseURL).not.toContain("art-full-stack.com");

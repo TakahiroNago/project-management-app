@@ -1,6 +1,6 @@
 import "server-only";
 import { Prisma } from "@/generated/prisma/client";
-import { lockProject, recordActivity } from "@/features/tasks/service";
+import { lockProject } from "@/features/tasks/service";
 import { m } from "@/i18n";
 import { authorizeProject } from "@/lib/auth/authorization";
 import { db } from "@/lib/db";
@@ -50,20 +50,22 @@ export async function removeMember(actorId: string, projectId: string, memberUse
     if (!membership) throw new NotFoundError();
     if (membership.role === "OWNER") throw new ValidationError(m.member.cannotRemoveOwner);
 
-    const assigned = await tx.task.findMany({
-      where: { projectId, assigneeId: memberUserId },
-      select: { id: true },
-    });
-    await tx.task.updateMany({
+    // 担当タスクの数によらず、更新と履歴の記録をそれぞれ 1 回のクエリで行う（DB との往復を増やさない）
+    const assigned = await tx.task.updateManyAndReturn({
       where: { projectId, assigneeId: memberUserId },
       data: { assigneeId: null },
+      select: { id: true },
     });
-    for (const task of assigned) {
-      await recordActivity(tx, {
-        projectId,
-        taskId: task.id,
-        userId: actorId,
-        changes: [{ action: "ASSIGNEE_CHANGED", oldValue: memberUserId, newValue: null }],
+    if (assigned.length > 0) {
+      await tx.activityLog.createMany({
+        data: assigned.map((task) => ({
+          projectId,
+          taskId: task.id,
+          userId: actorId,
+          action: "ASSIGNEE_CHANGED" as const,
+          oldValue: memberUserId,
+          newValue: null,
+        })),
       });
     }
 

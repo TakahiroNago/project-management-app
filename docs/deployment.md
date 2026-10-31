@@ -7,7 +7,7 @@ ProjectFlow を Vercel + Neon + Resend で公開するための手順と運用�
 
 | 環境 | URL | DB（Neon） | メール | デプロイ |
 |---|---|---|---|---|
-| Production | `https://projects.art-full-stack.com` | 本番ブランチ | 全ユーザーに送信 | GitHub Actions のマイグレーション成功後に Deploy Hook で開始 |
+| Production | `https://projectflow.art-full-stack.com` | 本番ブランチ | 全ユーザーに送信 | GitHub Actions のマイグレーション成功後に Deploy Hook で開始 |
 | Preview | Vercel が発行する URL（`*.vercel.app`） | Preview ブランチ | 許可リストの宛先のみ | main 以外のブランチへの push で自動 |
 | ローカル | `http://localhost:3000` | Docker の PostgreSQL | 送信せずコンソールに URL を出力 | — |
 
@@ -140,7 +140,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 
 | 環境 | `BETTER_AUTH_URL` | 基準 URL（再設定メールのリンク） | 信頼するオリジン |
 |---|---|---|---|
-| Production | `https://projects.art-full-stack.com` | 本番ドメイン | 本番ドメインのみ |
+| Production | `https://projectflow.art-full-stack.com` | 本番ドメイン | 本番ドメインのみ |
 | Preview | **設定しない**（設定されていると起動しない） | そのデプロイのブランチ URL（`VERCEL_BRANCH_URL`） | そのデプロイ自身の URL（`VERCEL_BRANCH_URL` と `VERCEL_URL`）のみ |
 
 - Preview では `*.vercel.app` のようなワイルドカードを使わず、そのデプロイ自身の URL だけを信頼する（`src/lib/auth/origins.ts`）。他のデプロイや第三者のサイトからは認証 API を呼べない
@@ -165,14 +165,17 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 
 1. GitHub のリポジトリをインポートする（Framework: Next.js、ビルドコマンドは既定の `npm run build`）
 2. Node.js のバージョン: Settings → Build and Deployment → Node.js Version を **24.x** にする。`package.json` の `engines`（`24.x`）が優先されるが、画面の設定と食い違うとビルド時に警告が出るため揃えておく（`.nvmrc`・CI も 24）
-3. Domains に `projects.art-full-stack.com` を追加し、指示に従って DNS（CNAME）を設定する
-4. Functions のリージョンを Neon と同じか最も近いリージョンに設定する
+3. Domains に `projectflow.art-full-stack.com` を追加し、指示に従って DNS（CNAME）を設定する
+4. Functions のリージョンは `vercel.json` の `"regions": ["sin1"]`（シンガポール。Neon の `aws-ap-southeast-1` と同じ地域）で指定している。`vercel.json` の指定は画面の設定より優先される
+   - 確認方法: 本番の応答ヘッダー `X-Vercel-Id` の 2 番目の値（`<受信した拠点>::<関数のリージョン>::<ID>`）が `sin1` であること。2026-10-31 の公開時点では指定がなく `iad1`（米国東部）で動いていた
+   - 関数と DB が離れていると、クエリ 1 回ごとに太平洋を往復する遅延（推定 200ms 以上）がかかる。Prisma の対話型トランザクションは既定で 5 秒で打ち切られるため、クエリの多い処理が失敗する原因になる
+   - Neon のリージョンを変える場合は、`vercel.json` の `regions` も合わせて変更する
 5. Deployment Protection（Vercel Authentication）を Preview に対して有効のままにする（第三者に Preview を見せない）
 6. **Deploy Hook** を作成する（Settings → Git → Deploy Hooks。ブランチは `main`）。URL は秘密情報として GitHub Secrets に登録する（6 章）。URL を知っていれば誰でもデプロイを開始できるため、漏えいした場合はすぐに削除して作り直す
 
 #### 本番の `*.vercel.app` の URL ではログインできない
 
-本番のデプロイには `projects.art-full-stack.com` のほかに、Vercel が発行する URL（`<project>.vercel.app`、デプロイごとの `<project>-<hash>-<team>.vercel.app`）でもアクセスできます。Better Auth は本番では `BETTER_AUTH_URL` だけを信頼するため、**これらの URL からはログイン・登録・パスワード再設定ができません**（Origin 検証で拒否されます。意図どおりの動作です）。
+本番のデプロイには `projectflow.art-full-stack.com` のほかに、Vercel が発行する URL（`<project>.vercel.app`、デプロイごとの `<project>-<hash>-<team>.vercel.app`）でもアクセスできます。Better Auth は本番では `BETTER_AUTH_URL` だけを信頼するため、**これらの URL からはログイン・登録・パスワード再設定ができません**（Origin 検証で拒否されます。意図どおりの動作です）。
 
 - 利用者には本番ドメインだけを案内する
 - Vercel の Domains で `<project>.vercel.app` を本番ドメインへリダイレクトする設定を推奨
@@ -191,7 +194,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 | `DATABASE_URL` | 本番ブランチの **Pooled** | Preview ブランチ（`preview_app`）の **Pooled** | ✅ |
 | `PRODUCTION_DB_ENDPOINT_ID` | 本番ブランチのエンドポイント ID | 同じ値（本番 DB を検出するため） | — |
 | `BETTER_AUTH_SECRET` | 本番用に生成した値 | Preview 用に生成した**別の値** | ✅ |
-| `BETTER_AUTH_URL` | `https://projects.art-full-stack.com` | **設定しない** | — |
+| `BETTER_AUTH_URL` | `https://projectflow.art-full-stack.com` | **設定しない** | — |
 | `RESEND_API_KEY` | 本番用のキー | Preview 用のキー（任意） | ✅ |
 | `MAIL_FROM` | `ProjectFlow <no-reply@mail.art-full-stack.com>` | 同じ（`RESEND_API_KEY` を設定する場合は必須） | — |
 | `PREVIEW_MAIL_ALLOWED_RECIPIENTS` | 設定しない | 開発者のメールアドレス（任意） | — |
@@ -335,7 +338,7 @@ Preview の DB（Neon の Preview ブランチ）は、**すべての作業ブ�
 - [ ] Neon: 本番・Preview ブランチ、Preview 専用ロール、エンドポイント ID の控え
 - [ ] Neon: 履歴保持の期間を確認して記録
 - [ ] Resend: `mail.art-full-stack.com` の認証、Production・Preview の API キー
-- [ ] Vercel: 環境変数（Production / Preview を分けて登録）、独自ドメイン、`*.vercel.app` から本番ドメインへのリダイレクト、関数のリージョン、Node.js 24.x、Deploy Hook、Preview の Deployment Protection
+- [ ] Vercel: 環境変数（Production / Preview を分けて登録）、独自ドメイン、`*.vercel.app` から本番ドメインへのリダイレクト、関数のリージョン（`X-Vercel-Id` が `sin1`）、Node.js 24.x、Deploy Hook、Preview の Deployment Protection
 - [ ] GitHub: Environments（`production` の承認者、ブランチ制限は「Selected branches and tags」で `main` のみ）、Secrets、Variables
 - [ ] GitHub: 承認者の設定を外した状態で `target: production` を実行し、preflight で停止することを確認（確認後に設定を戻す）
 - [ ] `target: preview` でマイグレーションを実行し、Preview で登録・ログイン・再設定メール（許可リストの宛先）を確認
