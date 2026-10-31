@@ -42,9 +42,12 @@ GitHub (他ブランチ) ──▶ Vercel Preview ──▶ Neon Preview ブラ�
 1. Neon でプロジェクトを作成する。リージョンは利用者に近い場所を選び、**Vercel の関数のリージョンも同じか最も近い場所に設定する**（5 章）。PostgreSQL のバージョンはローカル・CI と同じ 17 にする
 2. 既定のブランチを**本番ブランチ**とする
 3. **本番にユーザーデータが入る前に**、本番ブランチから Preview 用のブランチ（例: `preview`）を作成する
-   - Neon のブランチは作成元のデータをコピーするため、公開後に本番から作り直すと本番ユーザーの個人情報が Preview に入ってしまう。**公開後に Preview ブランチを本番から作り直さないこと**（作り直す場合は、スキーマのみのブランチを作成するか、作成後にデータを全削除する）
-4. **Preview ブランチにだけ存在するロール**（例: `preview_app`）を作成し、Preview 環境ではそのロールの接続文字列を使う
-   - ブランチは作成元のロールを引き継ぐため、作成元のロールの接続文字列は Preview でも本番でも使えてしまう。Preview 専用のロールを使えば、その接続文字列で本番ブランチにはログインできない（認証情報のレベルで分離される）
+   - Neon のブランチは作成時点の作成元のデータをそのまま引き継ぐため（コピーオンライト。物理的な全件コピーはしないが、データは見える）、公開後に本番から作り直すと本番ユーザーの個人情報が Preview に入ってしまう。**公開後に Preview ブランチを本番から作り直さないこと**（作り直す場合は、スキーマのみのブランチを作成するか、作成後にデータを全削除する）
+   - **Preview ブランチで「Reset from parent」を使わないこと**。親ブランチ（本番）の最新のスキーマと**データ**で置き換えるため、本番の個人情報が Preview に入る
+   - スキーマのみのブランチ（`neon branches create --schema-only`。現在 Beta）は、親を持たない独立したルートブランチになる。そのため「Reset from parent」は使えず、作成できる数はプランのルートブランチの上限に含まれる
+4. 各ブランチは専用のコンピュート（エンドポイント）を持つ。アプリの DB 分離チェック（`PRODUCTION_DB_ENDPOINT_ID`）は、このエンドポイント ID の違いを利用している
+5. **Preview ブランチにだけ存在するロール**（例: `preview_app`）を作成し、Preview 環境ではそのロールの接続文字列を使う
+   - ブランチは作成元のロールを引き継ぐため（**未確認**: Neon の資料で確認できていない。設定時に、Neon の画面で Preview 専用ロールが本番ブランチに存在しないことを確認すること）、作成元のロールの接続文字列は Preview でも本番でも使えてしまう。Preview 専用のロールを使えば、その接続文字列で本番ブランチにはログインできない（認証情報のレベルで分離される）
 
 ### 2.2 取得する接続文字列
 
@@ -62,12 +65,18 @@ Neon の「Connect」画面で、ブランチ・ロールごとに次の 2 種�
 | 本番ブランチ | Vercel の Production | GitHub Environment `production` |
 | Preview ブランチ（`preview_app`） | Vercel の Preview | GitHub Environment `preview` |
 
+Neon CLI を使う場合、`neon connection-string <ブランチ名>` は既定で **Direct** の接続文字列を返します。どちらの場合も、ホスト名に `-pooler` が付いているかで Pooled / Direct を見分けてください。
+
+> **このリポジトリで `neon env pull` を実行しないでください。** `.env`（無ければ `.env.local`）に `DATABASE_URL`（Pooled）と `DATABASE_URL_UNPOOLED`（Direct）などを書き込みます。`neon link`・`neon checkout`・`neon deploy`（`neon config apply`）も既定で同じ書き込みを行い、`neon init` も初期設定の中で行います。ローカルの `.env` は Docker の DB 用で、リモートの接続情報を置かない方針です（2.3）。`.env.local` に書き込まれた場合も、Next.js の開発サーバーはそちらを優先して読み込むため、`npm run dev` がリモートの DB に接続してしまいます。
+>
+> ProjectFlow は Neon の `neon.ts`（インフラの設定ファイル）・Neon Auth・Neon Functions を使いません。Neon の設定は Neon の画面で行い、接続文字列は 2.2 の表のとおり Vercel と GitHub にだけ登録してください。Neon CLI で操作する場合は、`neon link` / `neon checkout` に `--no-env-pull` を付けてください。
+
 あわせて、**本番ブランチのエンドポイント ID**（ホスト名の先頭の `ep-xxxx` の部分。`-pooler` は含めない）を控えます。秘密情報ではありませんが、Preview から本番 DB への接続を拒否するために使います（`PRODUCTION_DB_ENDPOINT_ID`）。
 
 ### 2.3 Pooled と Direct を分ける理由
 
 - アプリはサーバーレス環境で動き、インスタンスごとに接続を作るため、接続数の上限に達しにくい Pooled Connection（PgBouncer）を使う
-- マイグレーションは PgBouncer（トランザクション単位のプール）を経由すると、セッション単位のロックなどが正しく動かないことがあるため、Direct Connection を使う
+- マイグレーションは Direct Connection を使う。Pooled Connection は PgBouncer のトランザクションモードで、セッション単位の操作に対応していない。経由すると、プールが原因だとは分からない形で失敗する（例: Prisma Migrate の `prepared statement "s0" already exists`、`SET` が次のクエリに引き継がれない）
 - Prisma 7 では `schema.prisma` の `directUrl` が廃止されたため、Prisma CLI の接続先は `prisma.config.ts` の `datasource.url` で指定する。本プロジェクトでは `prisma/migration-url.ts` で次のように決める
 
 | 状況 | Prisma CLI の接続先 |
@@ -78,7 +87,16 @@ Neon の「Connect」画面で、ブランチ・ロールごとに次の 2 種�
 
 `prisma generate` は接続先を必要としないため、Vercel のビルド（`DIRECT_URL` なし）でも成功します。
 
+> Neon の資料には「Prisma は `url` と `directUrl` を指定する」という記述がありますが、これは Prisma 6 までの方法です。Prisma 7 では `schema.prisma` の `directUrl` が廃止されたため、本プロジェクトでは上の表のとおり `prisma.config.ts` で切り替えています。
+
 また、接続先がローカル（localhost）以外のときは、`prisma migrate dev`（`npm run db:migrate`）・`prisma migrate reset`・`prisma db push` を設定の読み込み時に拒否します。これらは開発用で、DB のリセット（全データの削除）を伴うことがあるためです。リモートの DB には GitHub Actions の `prisma migrate deploy` だけを使います。**ローカルの `.env` にリモートの `DIRECT_URL` を書かないでください。**
+
+### 2.4 コンピュートの自動停止（Scale to zero）
+
+- アイドル状態が続くと、コンピュートは自動で停止する（既定 5 分。時間は変更できる。停止しない設定は Launch / Scale プランのみ）
+- 停止後の最初のクエリは、起動のため数百ミリ秒ほど遅くなる。公開直後やアクセスの少ない時間帯は、最初の表示が遅くなることがある
+- 停止中もデータ（ストレージ）は保持される
+- ログイン直後の表示などで遅さが問題になる場合は、プランと停止までの時間を見直す
 
 ## 3. Better Auth
 
@@ -252,7 +270,7 @@ Preview の DB（Neon の Preview ブランチ）は、**すべての作業ブ�
 - 戻し方（いずれかの方法）
   1. Neon で Preview ブランチを、マイグレーションを適用する前の時点に復元する（履歴保持の範囲内の場合。最も簡単）
   2. Preview ブランチの `public` スキーマを作り直して（全テーブルを削除）、main の状態で `target: preview` のマイグレーションを実行し直す。Preview のデータは消える
-- **本番ブランチから Preview ブランチを作り直さないこと**（本番ユーザーの個人情報が Preview に入るため。2.1 参照）
+- **本番ブランチから Preview ブランチを作り直さない・「Reset from parent」を使わないこと**（本番ユーザーの個人情報が Preview に入るため。2.1 参照）
 - Preview の DB に対する操作は、Preview ブランチの接続情報で行い、本番ブランチの接続情報を使わない
 
 ### マイグレーションの書き方の注意
@@ -266,16 +284,16 @@ Preview の DB（Neon の Preview ブランチ）は、**すべての作業ブ�
 | 項目 | 方針 |
 |---|---|
 | 継続的なバックアップ | Neon の履歴保持（指定した時点にブランチを復元できる機能）を使う。保持期間はプランによって異なるため、契約しているプランの保持期間を確認して記録しておく |
-| マイグレーション前 | 本番ブランチから**バックアップ用のブランチ**（例: `backup-20261101-add-xxx`）を作成してから実行する。問題が無ければ 1〜2 週間後に削除する |
+| マイグレーション前 | 本番ブランチから**バックアップ用のブランチ**（例: `backup-20261101-add-xxx`）を作成してから実行する。消し忘れを防ぐため、作成時に有効期限を付ける（例: `neon branches create --name <名前> --parent <本番ブランチ> --expires-at <2 週間後の日時>`）。バックアップ用のブランチは本番のデータを含むため、接続情報を Preview や GitHub に設定しない |
 | 定期的な論理バックアップ | 月 1 回、`pg_dump`（Direct Connection を使う）で取得し、暗号化して DB とは別の場所に保管する。保管期間を決めて古いものは削除する |
 | 復旧の目標 | 目標復旧時点: 履歴保持の範囲内なら障害の直前。目標復旧時間: 1 時間以内 |
-| 復旧訓練 | 公開前と、その後は四半期に 1 回、Preview 用のブランチに復元して手順を確認する |
+| 復旧訓練 | 公開前と、その後は四半期に 1 回、本番ブランチの過去の時点から**訓練用の一時ブランチ**（有効期限付き）を作成して手順を確認する。Preview ブランチには復元しない（本番の個人情報が Preview に入るため）。訓練用ブランチの接続情報は Vercel・GitHub に設定せず、確認後に削除する |
 
 ### 8.2 復旧手順
 
 1. 影響を確認し、必要なら Vercel で本番を以前のデプロイに戻す（Instant Rollback）か、メンテナンス表示にする
 2. Neon で本番ブランチを、障害の直前の時点またはバックアップ用のブランチの状態に復元する
-   - 本番ブランチを「その場で」復元すれば、エンドポイント（接続文字列）は変わらないため、Vercel の設定変更は不要
+   - 本番ブランチを「その場で」復元すれば、エンドポイント（接続文字列）は変わらないため、Vercel の設定変更は不要（**未確認**: 初回の復旧訓練で、復元後も接続文字列が変わらないことを確認すること）
    - 別のブランチに復元した場合は接続文字列とエンドポイント ID が変わるため、Vercel の `DATABASE_URL`、GitHub の `DIRECT_URL`、`PRODUCTION_DB_ENDPOINT_ID` をすべて更新する
 3. `prisma migrate status` でスキーマとマイグレーションの状態を確認する
 4. 本番で動作を確認し、影響を受けたユーザーへの連絡が必要か判断する
