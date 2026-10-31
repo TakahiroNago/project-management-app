@@ -14,7 +14,7 @@ const productionEnv = {
   DATABASE_URL: pooled(PROD_ENDPOINT),
   PRODUCTION_DB_ENDPOINT_ID: PROD_ENDPOINT,
   BETTER_AUTH_SECRET: SECRET,
-  BETTER_AUTH_URL: "https://projects.art-full-stack.com",
+  BETTER_AUTH_URL: "https://projectflow.art-full-stack.com",
   RESEND_API_KEY: "re_live_key",
   MAIL_FROM: "ProjectFlow <no-reply@mail.art-full-stack.com>",
 };
@@ -71,15 +71,15 @@ describe("validateServerEnv", () => {
 
   it("本番の設定がそろっていれば問題なし", () => {
     expect(validateServerEnv(productionEnv)).toEqual([]);
-    expect(validateServerEnv({ ...productionEnv, BETTER_AUTH_URL: "https://projects.art-full-stack.com/" })).toEqual([]);
+    expect(validateServerEnv({ ...productionEnv, BETTER_AUTH_URL: "https://projectflow.art-full-stack.com/" })).toEqual([]);
   });
 
   it.each([
     ["BETTER_AUTH_SECRET", { BETTER_AUTH_SECRET: undefined }],
     ["BETTER_AUTH_SECRET", { BETTER_AUTH_SECRET: "short" }],
     ["BETTER_AUTH_URL", { BETTER_AUTH_URL: undefined }],
-    ["BETTER_AUTH_URL", { BETTER_AUTH_URL: "http://projects.art-full-stack.com" }],
-    ["BETTER_AUTH_URL", { BETTER_AUTH_URL: "https://projects.art-full-stack.com/app" }],
+    ["BETTER_AUTH_URL", { BETTER_AUTH_URL: "http://projectflow.art-full-stack.com" }],
+    ["BETTER_AUTH_URL", { BETTER_AUTH_URL: "https://projectflow.art-full-stack.com/app" }],
     ["RESEND_API_KEY", { RESEND_API_KEY: "" }],
     ["MAIL_FROM", { MAIL_FROM: undefined }],
     ["DATABASE_URL", { DATABASE_URL: undefined }],
@@ -102,7 +102,7 @@ describe("validateServerEnv", () => {
   });
 
   it.each([
-    ["BETTER_AUTH_URL", { BETTER_AUTH_URL: "https://projects.art-full-stack.com" }],
+    ["BETTER_AUTH_URL", { BETTER_AUTH_URL: "https://projectflow.art-full-stack.com" }],
     ["VERCEL_URL", { VERCEL_URL: undefined }],
     ["MAIL_FROM", { RESEND_API_KEY: "re_preview_key" }],
     ["DISABLE_AUTH_RATE_LIMIT", { DISABLE_AUTH_RATE_LIMIT: "true" }],

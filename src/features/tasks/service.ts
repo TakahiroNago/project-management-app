@@ -1,7 +1,7 @@
 import "server-only";
 import { type ActivityChange, diffTaskChanges, type TrackedTaskFields } from "@/domain/activity";
 import { parseDateOnly, toDateOnlyString } from "@/domain/dates";
-import type { TaskStatus } from "@/generated/prisma/client";
+import { Prisma, type TaskStatus } from "@/generated/prisma/client";
 import { m } from "@/i18n";
 import { authorizeProject } from "@/lib/auth/authorization";
 import { db, type DbClient } from "@/lib/db";
@@ -56,13 +56,25 @@ async function loadColumns(tx: DbClient, projectId: string, statuses: TaskStatus
   });
 }
 
-/** 並びの変化分だけ status / position を更新する */
-async function applyPositions(tx: DbClient, current: PositionedTask[], columns: ColumnOrder) {
-  for (const change of diffPositions(current, columns)) {
-    await tx.task.update({
-      where: { id: change.id },
-      data: { status: change.status, position: change.position },
-    });
+/**
+ * 並びの変化分だけ status / position を更新する。
+ * 変化したタスクの数によらず 1 回の UPDATE で行う（DB との往復はトランザクションの所要時間に直結するため）。
+ * Prisma の @updatedAt は生 SQL では設定されないため、updatedAt も明示的に更新する（列は UTC の timestamp）。
+ */
+async function applyPositions(tx: DbClient, projectId: string, current: PositionedTask[], columns: ColumnOrder) {
+  const changes = diffPositions(current, columns);
+  if (changes.length === 0) return;
+  const rows = Prisma.join(
+    changes.map((change) => Prisma.sql`(${change.id}::text, ${change.status}::"TaskStatus", ${change.position}::integer)`),
+  );
+  const updated = await tx.$executeRaw`
+    UPDATE "tasks" AS t
+       SET "status" = v."status", "position" = v."position", "updatedAt" = now() AT TIME ZONE 'UTC'
+      FROM (VALUES ${rows}) AS v("id", "status", "position")
+     WHERE t."id" = v."id" AND t."projectId" = ${projectId}`;
+  // プロジェクト行をロックした後に読み込んだタスクのため、件数は必ず一致する（一致しなければ不整合として中断する）
+  if (updated !== changes.length) {
+    throw new Error(`Expected to reposition ${changes.length} tasks, but updated ${updated}.`);
   }
 }
 
@@ -132,6 +144,7 @@ export async function updateTask(userId: string, taskId: string, input: TaskInpu
       const current = await loadColumns(tx, projectId, [before.status, input.status]);
       await applyPositions(
         tx,
+        projectId,
         current,
         moveTaskInColumns(groupIntoColumns(current), taskId, input.status, Infinity),
       );
@@ -163,6 +176,7 @@ export async function moveTask(userId: string, taskId: string, input: MoveTaskIn
     const current = await loadColumns(tx, projectId, [...new Set([status, input.status])]);
     await applyPositions(
       tx,
+      projectId,
       current,
       moveTaskInColumns(groupIntoColumns(current), taskId, input.status, input.index),
     );
@@ -189,7 +203,7 @@ export async function deleteTask(userId: string, taskId: string) {
     await tx.task.delete({ where: { id: taskId } });
     // 削除した列を詰め直す
     const current = await loadColumns(tx, projectId, [status]);
-    await applyPositions(tx, current, groupIntoColumns(current));
+    await applyPositions(tx, projectId, current, groupIntoColumns(current));
     return { projectId };
   });
 }

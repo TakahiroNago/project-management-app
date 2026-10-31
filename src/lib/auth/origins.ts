@@ -16,7 +16,7 @@ function toHttpsOrigin(host: string | undefined): string | undefined {
 /**
  * Better Auth の baseURL と信頼するオリジンを決める。
  *
- * - Production / local: BETTER_AUTH_URL（本番は https://projects.art-full-stack.com）だけを信頼する。
+ * - Production / local: BETTER_AUTH_URL（本番は https://projectflow.art-full-stack.com）だけを信頼する。
  * - Preview: そのデプロイ自身の URL（Vercel が設定する VERCEL_BRANCH_URL と VERCEL_URL）だけを信頼する。
  *   *.vercel.app のようなワイルドカードは使わないため、他のデプロイや他人のサイトからは認証 API を呼べない。
  *   再設定メールのリンクはブランチの URL（無ければデプロイの URL）になり、本番ドメインを指さない。

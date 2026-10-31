@@ -3,8 +3,8 @@
 個人開発者・小規模チーム（2〜10 人）向けのプロジェクト管理 Web アプリケーションです。
 プロジェクト単位でタスクを管理し、進捗・優先度・期限を把握できます。
 
-> **開発状況**: Phase 4（品質向上）まで完了。Phase 5（公開）は本番環境の設定・マイグレーションの仕組みまで実装済みで、公開作業は未実施です。
-> 本番 URL（予定）: https://projects.art-full-stack.com
+> **開発状況**: Phase 4（品質向上）まで完了。Phase 5（公開）は本番公開済みで、公開後のレビューへの対応と残りの資料作成を進めています。
+> 本番 URL: https://projectflow.art-full-stack.com
 > 詳細は [docs/progress.md](docs/progress.md) を参照してください。
 
 ## 主な機能（Phase 3 時点）

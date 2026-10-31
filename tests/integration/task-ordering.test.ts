@@ -4,6 +4,7 @@ import { createTask, deleteTask, moveTask, updateTask } from "@/features/tasks/s
 import { db } from "@/lib/db";
 import { ForbiddenError, NotFoundError } from "@/lib/errors";
 import { addMember, createUser, projectInput, taskInput } from "../helpers/factories";
+import { countTransactionQueries } from "../helpers/query-count";
 
 type Status = "TODO" | "IN_PROGRESS" | "DONE";
 
@@ -138,5 +139,60 @@ describe("Server Action 経由の移動", () => {
     const error = await moveTask(stranger.id, ids.A, { status: "DONE", index: 0 }).catch((e) => e);
     expect(error).toBeInstanceOf(NotFoundError);
     expect(error).not.toBeInstanceOf(ForbiddenError);
+  });
+});
+
+describe("タスクが多い列での並べ替え（DB との往復の回数）", () => {
+  /** 指定した列に count 件のタスクを position 順に直接作成する（"T00", "T01", …） */
+  async function seedColumn(projectId: string, count: number, status: Status = "TODO") {
+    await db.task.createMany({
+      data: Array.from({ length: count }, (_, i) => ({
+        projectId,
+        title: `T${String(i).padStart(2, "0")}`,
+        status,
+        position: i,
+      })),
+    });
+    return db.task.findMany({ where: { projectId, status }, orderBy: { position: "asc" }, select: { id: true } });
+  }
+
+  async function projectWithColumn(count: number) {
+    const owner = await createUser(`owner-${count}`);
+    const project = await createProject(owner.id, projectInput());
+    const tasks = await seedColumn(project.id, count);
+    return { owner, project, tasks };
+  }
+
+  it("末尾のカードを先頭へ移すと全件の position が振り直され、updatedAt も更新される", async () => {
+    const { owner, project, tasks } = await projectWithColumn(60);
+    const before = await db.task.findUniqueOrThrow({ where: { id: tasks[0].id }, select: { updatedAt: true } });
+
+    await moveTask(owner.id, tasks[59].id, { status: "TODO", index: 0 });
+
+    const titles = (await board(project.id)).TODO;
+    expect(titles[0]).toBe("T59");
+    expect(titles.slice(1)).toEqual(Array.from({ length: 59 }, (_, i) => `T${String(i).padStart(2, "0")}`));
+    await expectContiguousPositions(project.id);
+    const after = await db.task.findUniqueOrThrow({ where: { id: tasks[0].id }, select: { updatedAt: true } });
+    expect(after.updatedAt.getTime()).toBeGreaterThan(before.updatedAt.getTime());
+    // UTC で保存されていること（Prisma が書く値と同じ基準。数秒以内）
+    expect(Math.abs(after.updatedAt.getTime() - Date.now())).toBeLessThan(60_000);
+  });
+
+  it("移動・編集・削除のクエリ数は列のタスク数によらず一定", async () => {
+    const small = await projectWithColumn(5);
+    const large = await projectWithColumn(60);
+
+    const queries = async ({ owner, tasks }: Awaited<ReturnType<typeof projectWithColumn>>) => ({
+      move: await countTransactionQueries(() => moveTask(owner.id, tasks.at(-1)!.id, { status: "TODO", index: 0 })),
+      moveAcross: await countTransactionQueries(() => moveTask(owner.id, tasks[0].id, { status: "DONE", index: 0 })),
+      update: await countTransactionQueries(() =>
+        updateTask(owner.id, tasks[1].id, taskInput({ title: "変更", status: "IN_PROGRESS" })),
+      ),
+      remove: await countTransactionQueries(() => deleteTask(owner.id, tasks[2].id)),
+    });
+
+    expect(await queries(large)).toEqual(await queries(small));
+    await expectContiguousPositions(large.project.id);
   });
 });

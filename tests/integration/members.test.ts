@@ -7,6 +7,8 @@ import { m } from "@/i18n";
 import { db } from "@/lib/db";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { createUser, projectInput, taskInput } from "../helpers/factories";
+import { resetDatabase } from "../helpers/db";
+import { countTransactionQueries } from "../helpers/query-count";
 
 async function setup() {
   const owner = await createUser("owner");
@@ -137,5 +139,36 @@ describe("メンバー削除", () => {
 
     expect(await db.task.count({ where: { projectId: project.id, assigneeId: alice.id } })).toBe(0);
     expect(await db.projectMember.count({ where: { projectId: project.id, userId: alice.id } })).toBe(0);
+  });
+
+  it("担当タスクが多くても、未割り当てへの変更と履歴の記録は件数によらず一定のクエリ数で行う", async () => {
+    const queriesFor = async (count: number) => {
+      const { owner, alice, project } = await setup();
+      await addMember(owner.id, project.id, alice.email);
+      await db.task.createMany({
+        data: Array.from({ length: count }, (_, i) => ({
+          projectId: project.id,
+          title: `T${i}`,
+          assigneeId: alice.id,
+          position: i,
+        })),
+      });
+      let result: Awaited<ReturnType<typeof removeMember>> | undefined;
+      const queries = await countTransactionQueries(async () => {
+        result = await removeMember(owner.id, project.id, alice.id);
+      });
+      expect(result).toEqual({ name: "alice", unassignedTaskCount: count });
+      expect(await db.task.count({ where: { projectId: project.id, assigneeId: null } })).toBe(count);
+      expect(
+        await db.activityLog.count({
+          where: { projectId: project.id, action: "ASSIGNEE_CHANGED", oldValue: alice.id, newValue: null, userId: owner.id },
+        }),
+      ).toBe(count);
+      return queries;
+    };
+
+    const few = await queriesFor(2);
+    await resetDatabase();
+    expect(await queriesFor(40)).toBe(few);
   });
 });
