@@ -69,7 +69,8 @@ GitHub (他ブランチ) ──▶ Vercel Preview ──▶ Neon Preview ブラ�
    - スキーマのみのブランチ（`neon branches create --schema-only`。現在 Beta）は、親を持たない独立したルートブランチになる。そのため「Reset from parent」は使えず、作成できる数はプランのルートブランチの上限に含まれる
 4. 各ブランチは専用のコンピュート（エンドポイント）を持つ。アプリの DB 分離チェック（`PRODUCTION_DB_ENDPOINT_ID`）は、このエンドポイント ID の違いを利用している
 5. **Preview ブランチにだけ存在するロール**（例: `preview_app`）を作成し、Preview 環境ではそのロールの接続文字列を使う
-   - ブランチは作成元のロールを引き継ぐため（**未確認**: Neon の資料で確認できていない。設定時に、Neon の画面で Preview 専用ロールが本番ブランチに存在しないことを確認すること）、作成元のロールの接続文字列は Preview でも本番でも使えてしまう。Preview 専用のロールを使えば、その接続文字列で本番ブランチにはログインできない（認証情報のレベルで分離される）
+   - ブランチは作成元のロールを**パスワードごと**引き継ぐ（作成元が Protected でない場合。2026-10-31 に Preview ブランチの作成時に確認）。そのため作成元のロールの接続文字列は Preview でも本番でも使えてしまう。Preview ブランチの `neondb_owner` は作成後にパスワードをリセットし、本番とは別のパスワードにしている
+   - Preview 専用のロールを使えば、その接続文字列で本番ブランチにはログインできない（認証情報のレベルで分離される）。同様に、本番ブランチにだけ存在するアプリ用のロール `production_app` を本番で使う
 
 ### 2.2 取得する接続文字列
 
@@ -84,8 +85,15 @@ Neon の「Connect」画面で、ブランチ・ロールごとに次の 2 種�
 
 | | Pooled（`DATABASE_URL`） | Direct（`DIRECT_URL`） |
 |---|---|---|
-| 本番ブランチ | Vercel の Production | GitHub Environment `production` |
-| Preview ブランチ（`preview_app`） | Vercel の Preview | GitHub Environment `preview` |
+| 本番ブランチ | Vercel の Production（`production_app`） | GitHub Environment `production`（`neondb_owner`） |
+| Preview ブランチ | Vercel の Preview（`preview_app`） | GitHub Environment `preview`（`neondb_owner`） |
+
+アプリ用のロール（`production_app` / `preview_app`）の権限は次のとおりです（2026-11-01 に Neon の API でスキーマの定義から確認）。
+
+- `public` スキーマの `USAGE` のみ（テーブルの作成・変更はできない）
+- アプリのテーブル 10 個に `SELECT, INSERT, UPDATE, DELETE` のみ。`_prisma_migrations` には権限なし
+- `ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO <アプリ用のロール>` により、マイグレーション（`neondb_owner`）で今後作るテーブルにも同じ権限が自動で付く。**新しいテーブルを作るマイグレーションで GRANT を書く必要はない**
+- シーケンスには既定の権限を付けていない。現在の ID はすべて文字列（cuid など）でシーケンスを使わないが、**`autoincrement()` の列を追加する場合は、同じマイグレーションで `GRANT USAGE ON SEQUENCE … TO production_app, preview_app` が必要**（ロールが存在しない環境でも失敗しないよう、ロールの有無を確認してから付与する）
 
 Neon CLI を使う場合、`neon connection-string <ブランチ名>` は既定で **Direct** の接続文字列を返します。どちらの場合も、ホスト名に `-pooler` が付いているかで Pooled / Direct を見分けてください。
 
@@ -115,10 +123,20 @@ Neon CLI を使う場合、`neon connection-string <ブランチ名>` は既定�
 
 ### 2.4 コンピュートの自動停止（Scale to zero）
 
-- アイドル状態が続くと、コンピュートは自動で停止する（既定 5 分。時間は変更できる。停止しない設定は Launch / Scale プランのみ）
+- アイドル状態が続くと、コンピュートは自動で停止する（5 分）。**現在の Free プランでは停止までの時間を変更できない**（変更・停止しない設定は有料プランのみ）
 - 停止後の最初のクエリは、起動のため数百ミリ秒ほど遅くなる。公開直後やアクセスの少ない時間帯は、最初の表示が遅くなることがある
 - 停止中もデータ（ストレージ）は保持される
-- ログイン直後の表示などで遅さが問題になる場合は、プランと停止までの時間を見直す
+- ログイン直後の表示などで遅さが問題になる場合は、プランの変更を検討する
+
+### 2.5 契約しているプランと制約（2026-10-31 時点）
+
+| 項目 | 値 | 影響 |
+|---|---|---|
+| プラン | **Free** | — |
+| 履歴保持（指定した時点への復元） | **6 時間**（Neon の API で確認。`history_retention_seconds` = 21600） | 6 時間より前の時点には戻せない。気付くのが遅れた障害は、論理バックアップ（8 章）からしか戻せない |
+| コンピュートの自動停止 | 5 分（変更不可） | 2.4 |
+
+プランを変更した場合は、この表と 8 章の方針を更新してください。
 
 ## 3. Better Auth
 
@@ -191,7 +209,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 
 | 変数 | Production | Preview | Sensitive |
 |---|---|---|---|
-| `DATABASE_URL` | 本番ブランチの **Pooled** | Preview ブランチ（`preview_app`）の **Pooled** | ✅ |
+| `DATABASE_URL` | 本番ブランチ（`production_app`）の **Pooled** | Preview ブランチ（`preview_app`）の **Pooled** | ✅ |
 | `PRODUCTION_DB_ENDPOINT_ID` | 本番ブランチのエンドポイント ID | 同じ値（本番 DB を検出するため） | — |
 | `BETTER_AUTH_SECRET` | 本番用に生成した値 | Preview 用に生成した**別の値** | ✅ |
 | `BETTER_AUTH_URL` | `https://projectflow.art-full-stack.com` | **設定しない** | — |
@@ -211,8 +229,8 @@ Settings → Environments で 2 つの環境を作成します。
 
 | Environment | 保護ルール | Secrets |
 |---|---|---|
-| `production` | **Required reviewers**（承認者を指定）、Deployment branches を `main` のみに制限 | `DIRECT_URL`（本番ブランチの Direct）、`VERCEL_DEPLOY_HOOK_URL` |
-| `preview` | なし | `DIRECT_URL`（Preview ブランチ・`preview_app` の Direct） |
+| `production` | **Required reviewers**（承認者を指定）、Deployment branches を `main` のみに制限 | `DIRECT_URL`（本番ブランチ・`neondb_owner` の Direct）、`VERCEL_DEPLOY_HOOK_URL` |
+| `preview` | なし | `DIRECT_URL`（Preview ブランチ・`neondb_owner` の Direct。`preview_app` はテーブルを作成できないため使わない） |
 
 Settings → Secrets and variables → Actions → **Variables** に、リポジトリ変数 `PRODUCTION_DB_ENDPOINT_ID`（本番ブランチのエンドポイント ID）を登録します。
 
@@ -308,35 +326,67 @@ Preview の DB（Neon の Preview ブランチ）は、**すべての作業ブ�
 
 | 項目 | 方針 |
 |---|---|
-| 継続的なバックアップ | Neon の履歴保持（指定した時点にブランチを復元できる機能）を使う。保持期間はプランによって異なるため、契約しているプランの保持期間を確認して記録しておく |
+| 継続的なバックアップ | Neon の履歴保持（指定した時点にブランチを復元できる機能）を使う。**現在の Free プランでは 6 時間分しかない**（2.5）。6 時間以内に気付いた障害だけを対象とし、それより前の状態は論理バックアップで戻す |
 | マイグレーション前 | 本番ブランチから**バックアップ用のブランチ**（例: `backup-20261101-add-xxx`）を作成してから実行する。消し忘れを防ぐため、作成時に有効期限を付ける（例: `neon branches create --name <名前> --parent <本番ブランチ> --expires-at <2 週間後の日時>`）。バックアップ用のブランチは本番のデータを含むため、接続情報を Preview や GitHub に設定しない |
-| 定期的な論理バックアップ | 月 1 回、`pg_dump`（Direct Connection を使う）で取得し、暗号化して DB とは別の場所に保管する。保管期間を決めて古いものは削除する |
-| 復旧の目標 | 目標復旧時点: 履歴保持の範囲内なら障害の直前。目標復旧時間: 1 時間以内 |
+| 定期的な論理バックアップ | **毎日 1 回**、`pg_dump`（Direct Connection を使う）で取得し、暗号化して DB とは別の場所に保管する（手順は 8.2。自動化は未導入）。保管期間は 30 日とし、古いものは削除する。履歴保持が 6 時間しかないため、これが 6 時間を超える障害に対する唯一の戻し先になる |
+| 復旧の目標 | 目標復旧時点: 6 時間以内に気付いた障害は障害の直前（履歴保持）、それ以外は**直前の論理バックアップの時点（最大 1 日分のデータを失う）**。目標復旧時間: 1 時間以内 |
 | 復旧訓練 | 公開前と、その後は四半期に 1 回、本番ブランチの過去の時点から**訓練用の一時ブランチ**（有効期限付き）を作成して手順を確認する。Preview ブランチには復元しない（本番の個人情報が Preview に入るため）。訓練用ブランチの接続情報は Vercel・GitHub に設定せず、確認後に削除する |
 
-### 8.2 復旧手順
+### 8.2 論理バックアップの取得
+
+本番の Direct Connection の接続文字列を使うため、**本番の接続情報を扱ってよい人が、自分の PC で**行います。接続文字列は画面・シェルの履歴・ファイルに残しません。Neon の PostgreSQL は 18 のため、同じバージョンの `pg_dump` を Docker で使います（Git Bash の場合）。
+
+```bash
+# 1. 接続文字列を読み込む（入力は画面に表示されず、履歴にも残らない）
+read -rs DIRECT_URL && export DIRECT_URL
+
+# 2. カスタム形式で取得する
+FILE="projectflow-$(date +%Y%m%d).dump"
+MSYS_NO_PATHCONV=1 docker run --rm -e DIRECT_URL postgres:18-alpine   sh -c 'pg_dump "$DIRECT_URL" --format=custom' > "$FILE"
+unset DIRECT_URL
+
+# 3. 中身を確認する（アプリのテーブル 10 個と _prisma_migrations の 11 個のデータが含まれること）
+MSYS_NO_PATHCONV=1 docker run --rm -i postgres:18-alpine pg_restore --list < "$FILE" | grep -c "TABLE DATA"
+
+# 4. 暗号化し、平文のファイルを削除する（パスフレーズはパスワード管理ツールに保管する）
+gpg --symmetric --cipher-algo AES256 "$FILE" && rm "$FILE"
+```
+
+- 暗号化したファイル（`.dump.gpg`）を、DB とも PC とも別の場所（クラウドストレージなど）に保管し、30 日より古いものは削除する
+- 平文のダンプには本番ユーザーの個人情報とパスワードのハッシュが含まれる。暗号化前のファイルを共有フォルダ・リポジトリの中に置かない
+- 取得に失敗した日は記録し、翌日までに取り直す
+
+**自動化する場合の注意**（未導入。導入するかは今後判断する）:
+
+- 公開リポジトリの GitHub Actions の Artifact は、GitHub にログインした誰でもダウンロードできるため、ダンプの保管先にしない
+- ワークフローで取得する場合は、公開鍵で暗号化してから外部のストレージに送り、復号用の秘密鍵は GitHub に置かない
+- 接続には読み取り専用のバックアップ用ロールを使い、書き込みできる接続情報を GitHub に置かない
+
+### 8.3 復旧手順
 
 1. 影響を確認し、必要なら Vercel で本番を以前のデプロイに戻す（Instant Rollback）か、メンテナンス表示にする
-2. Neon で本番ブランチを、障害の直前の時点またはバックアップ用のブランチの状態に復元する
+2. Neon で本番ブランチを、障害の直前の時点またはバックアップ用のブランチの状態に復元する（6 時間以内の時点に限る。2.5）
    - 本番ブランチを「その場で」復元すれば、エンドポイント（接続文字列）は変わらないため、Vercel の設定変更は不要（**未確認**: 初回の復旧訓練で、復元後も接続文字列が変わらないことを確認すること）
    - 別のブランチに復元した場合は接続文字列とエンドポイント ID が変わるため、Vercel の `DATABASE_URL`、GitHub の `DIRECT_URL`、`PRODUCTION_DB_ENDPOINT_ID` をすべて更新する
+   - 6 時間より前の状態に戻す必要がある場合は、論理バックアップ（8.2）を復号し、`pg_restore --clean --if-exists --single-transaction` で本番ブランチに復元する。**バックアップより後のデータは失われる**ため、復元の前に現在の状態も 8.2 の手順で取得しておく
 3. `prisma migrate status` でスキーマとマイグレーションの状態を確認する
 4. 本番で動作を確認し、影響を受けたユーザーへの連絡が必要か判断する
 
-### 8.3 マイグレーション失敗時
+### 8.4 マイグレーション失敗時
 
 - 失敗した時点でワークフローは止まり、**本番デプロイは開始されない**（本番では古いコードが動き続ける）
 - 失敗したマイグレーションは `_prisma_migrations` に記録され、解決するまで `migrate deploy` は再実行できない（失敗したまま次に進むことはない）
 - 対応:
   1. ワークフローのログでエラーの内容を確認する（ログに接続情報は出ない）
-  2. 一部だけ適用された変更があるか確認する。判断が難しい場合は、8.2 の手順でバックアップ用のブランチの状態に戻すのが最も安全
+  2. 一部だけ適用された変更があるか確認する。判断が難しい場合は、8.3 の手順でバックアップ用のブランチの状態に戻すのが最も安全
   3. 原因を修正したマイグレーションを作成し、CI → main → 再度ワークフローを実行する
   4. 部分的な変更を手で戻した場合は、`prisma migrate resolve --rolled-back <マイグレーション名>` で失敗の記録を解消する。本番の接続情報が必要な操作のため、承認者と 2 人で行う
 
 ## 9. 公開前のチェックリスト
 
-- [ ] Neon: 本番・Preview ブランチ、Preview 専用ロール、エンドポイント ID の控え
-- [ ] Neon: 履歴保持の期間を確認して記録
+- [ ] Neon: 本番・Preview ブランチ、アプリ用のロール（`production_app` / `preview_app`。2.2 の権限）、エンドポイント ID の控え
+- [ ] Neon: 履歴保持の期間を確認して記録（2.5。Free プランは 6 時間）
+- [ ] 毎日の論理バックアップ（8.2）を開始し、1 回目のファイルで `pg_restore --list` の確認と復号の確認を行う
 - [ ] Resend: `mail.art-full-stack.com` の認証、Production・Preview の API キー
 - [ ] Vercel: 環境変数（Production / Preview を分けて登録）、独自ドメイン、`*.vercel.app` から本番ドメインへのリダイレクト、関数のリージョン（`X-Vercel-Id` が `sin1`）、Node.js 24.x、Deploy Hook、Preview の Deployment Protection
 - [ ] GitHub: Environments（`production` の承認者、ブランチ制限は「Selected branches and tags」で `main` のみ）、Secrets、Variables

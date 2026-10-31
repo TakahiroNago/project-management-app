@@ -1,9 +1,11 @@
 import "server-only";
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/features/auth/schemas";
 import { resolveAuthOrigins } from "@/lib/auth/origins";
+import { checkUserInput, USER_INPUT_PATHS } from "@/lib/auth/user-input";
 import { runInBackground } from "@/lib/background";
 import { db } from "@/lib/db";
 import { getDeploymentEnv } from "@/lib/env";
@@ -64,6 +66,15 @@ export const auth = betterAuth({
     enabled: isAuthRateLimitEnabled(process.env),
     storage: "database",
     customRules: AUTH_RATE_LIMIT_RULES,
+  },
+
+  // 名前などの入力を、画面のフォームと同じ規則でサーバー側でも検証する（API を直接呼ばれた場合に備える）
+  hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      const result = checkUserInput(ctx.path, ctx.body);
+      if (!result.ok) throw new APIError("BAD_REQUEST", { message: result.message, code: "INVALID_USER_INPUT" });
+      if ((USER_INPUT_PATHS as readonly string[]).includes(ctx.path)) return { context: { body: result.body } };
+    }),
   },
 
   advanced: {

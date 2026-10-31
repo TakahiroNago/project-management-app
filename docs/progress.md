@@ -109,6 +109,28 @@ PostgreSQL 18 への変更後の CI で、E2E「キーボードだけでカー�
 | 統合テスト | 92 件成功（+3） |
 | E2E テスト | 25 件成功 |
 
+本番への反映（2026-10-31）: main（`acddcec`）で Database migration ワークフローを実行して本番デプロイ。本番の応答ヘッダー `X-Vercel-Id` が `kix1::sin1::…` になったことを確認した（6 回とも `sin1`）。
+
+### 2026-11-01: 公開後レビューへの対応（P1: B-3 入力検証、B-5 バックアップ、DB のロール）
+
+- **B-3（Better Auth の API のサーバー側の入力検証）**: 登録とプロフィール更新は、ブラウザから Better Auth の API（`/sign-up/email`・`/update-user`）を直接呼ぶ。Better Auth は名前の長さを制限せず（`/update-user` は型も検証しない）、画像の URL も受け付けるため、API を直接呼ぶと 50 文字を超える名前や文字列以外の値を保存できた
+  - `src/lib/auth/user-input.ts`: 画面のフォームと同じ規則（`requiredText(USER_NAME_MAX)`）で名前を検証し、前後の空白を除く。`image` と、`/update-user` での名前以外の項目は拒否する
+  - `src/lib/auth/auth.ts`: Better Auth の `hooks.before` から呼び、不正なら 400（`INVALID_USER_INPUT`）
+  - なお `emailVerified` などの変更は、Better Auth 自身が以前から拒否している（`input: false`）
+  - テスト: 単体 15 件、統合 3 件（実際の HTTP ハンドラーを経由。フックを外すと失敗することを確認）
+- **B-5（バックアップ）**: deployment.md を Free プランの制約に合わせて更新
+  - 2.5 を新設: 履歴保持 **6 時間**（API で `history_retention_seconds` = 21600 を確認）、自動停止 5 分（変更不可）
+  - 8 章: 論理バックアップを月 1 回から**毎日**に変更し、目標復旧時点を「6 時間以内は直前、それ以外は最大 1 日分のデータを失う」に修正。取得手順（接続文字列を表示・保存しない `pg_dump` → `pg_restore --list` での確認 → gpg で暗号化）を追加し、ローカルの DB で手順のコマンドが動くことを確認。論理バックアップからの復元手順も追加
+  - 自動化は未導入（公開リポジトリの Artifact は誰でもダウンロードできるため使わない、などの注意を記載）
+- **DB のロール（Neon の API で GET のみ）**: 本番ブランチに `production_app`、Preview ブランチに `preview_app` があり、どちらも `public` スキーマの `USAGE` と、アプリのテーブル 10 個への `SELECT, INSERT, UPDATE, DELETE` だけを持つ（`_prisma_migrations` への権限なし）。今後のテーブルにも既定の権限で同じ権限が付く。deployment.md に、ロールの対応（アプリは `*_app`、マイグレーションは `neondb_owner`）とシーケンスを追加する場合の注意を追記し、`preview` Environment の `DIRECT_URL` を `preview_app` と書いていた誤りを修正した
+
+| 種類 | 結果 |
+|---|---|
+| lint / 型チェック / ビルド | 成功 |
+| 単体テスト | 202 件成功（+15） |
+| 統合テスト | 95 件成功（+3） |
+| E2E テスト | 25 件成功 |
+
 ---
 
 ## Phase 4: 品質向上（2026-10-31 完了）
