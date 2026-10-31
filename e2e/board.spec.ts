@@ -1,5 +1,5 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { createProject, register } from "./helpers";
+import { createProject, register, waitForServerAction } from "./helpers";
 
 const column = (page: Page, status: "TODO" | "IN_PROGRESS" | "DONE") => page.getByTestId(`column-${status}`);
 const card = (page: Page, title: string) => page.locator(`[data-testid="kanban-card"][data-task-title="${title}"]`);
@@ -47,24 +47,22 @@ test("ドラッグ＆ドロップで列を移動・並べ替えでき、再読�
   expect(await titlesIn(column(page, "TODO"))).toEqual(["タスクA", "タスクB", "タスクC"]);
 
   // 列間の移動（空の列へ）
-  await dragTo(page, card(page, "タスクA"), column(page, "IN_PROGRESS"));
+  await waitForServerAction(page, () => dragTo(page, card(page, "タスクA"), column(page, "IN_PROGRESS")));
   await expect(column(page, "IN_PROGRESS").getByTestId("kanban-card")).toHaveCount(1);
   expect(await titlesIn(column(page, "TODO"))).toEqual(["タスクB", "タスクC"]);
 
   // 列内の並べ替え（C を B の上へ）
-  await dragTo(page, card(page, "タスクC"), card(page, "タスクB"), "top");
+  await waitForServerAction(page, () => dragTo(page, card(page, "タスクC"), card(page, "タスクB"), "top"));
   await expect.poll(() => titlesIn(column(page, "TODO"))).toEqual(["タスクC", "タスクB"]);
 
   // サーバーに保存されている
-  await page.waitForLoadState("networkidle");
   await page.reload();
   await expect.poll(() => titlesIn(column(page, "TODO"))).toEqual(["タスクC", "タスクB"]);
   expect(await titlesIn(column(page, "IN_PROGRESS"))).toEqual(["タスクA"]);
 
   // 完了列へ移動すると進捗率に反映される
-  await dragTo(page, card(page, "タスクA"), column(page, "DONE"));
+  await waitForServerAction(page, () => dragTo(page, card(page, "タスクA"), column(page, "DONE")));
   await expect(column(page, "DONE").getByTestId("kanban-card")).toHaveCount(1);
-  await page.waitForLoadState("networkidle");
   await page.getByRole("navigation", { name: "プロジェクトメニュー" }).getByRole("link", { name: "概要" }).click();
   await expect(page.getByText("1 / 3 タスク完了")).toBeVisible();
 });
@@ -80,11 +78,10 @@ test("キーボードだけでカードを別の列へ移動できる", async ({
   await expect(announcer).toContainText(/持ち上げました（未着手、1番目）|未着手の1番目に移動中/);
   await page.keyboard.press("ArrowRight");
   await expect(announcer).toContainText("進行中の1番目に移動中");
-  await page.keyboard.press("Space");
+  await waitForServerAction(page, () => page.keyboard.press("Space"));
   await expect(announcer).toContainText("進行中の1番目に移動しました");
 
   await expect(column(page, "IN_PROGRESS").getByTestId("kanban-card")).toHaveCount(1);
-  await page.waitForLoadState("networkidle");
   await page.reload();
   expect(await titlesIn(column(page, "IN_PROGRESS"))).toEqual(["キーボードで移動"]);
 });

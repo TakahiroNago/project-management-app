@@ -20,7 +20,7 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { useRouter } from "next/navigation";
-import { useId, useMemo, useRef, useState, useTransition } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
   type ColumnOrder,
@@ -81,6 +81,20 @@ export function KanbanBoard({
   // ドラッグ開始時の並び（キャンセル・保存失敗時に戻す）
   const snapshot = useRef<ColumnOrder | null>(null);
 
+  // 最新の並び（読み上げ用）。dnd-kit は onDragOver / onDragEnd を呼んだ直後、同じ処理の中で読み上げ
+  // （announcements）を呼ぶ。state は次の描画まで更新されないため、読み上げは移動前の位置になってしまう。
+  // そのため、ハンドラー内で計算した並びをここに保持し、読み上げはこちらを参照する
+  const latestColumns = useRef(columns);
+  useLayoutEffect(() => {
+    latestColumns.current = columns;
+  }, [columns]);
+
+  /** ローカルの並びを更新する（読み上げ用の最新の並びも同時に更新する） */
+  function applyColumns(next: ColumnOrder) {
+    latestColumns.current = next;
+    setColumns(next);
+  }
+
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
     // スマートフォンでは長押しでドラッグ開始（通常のスクロールを妨げない）
@@ -107,7 +121,7 @@ export function KanbanBoard({
   };
 
   function locate(id: UniqueIdentifier) {
-    const current = columns;
+    const current = latestColumns.current;
     const column = isColumn(id) ? id : findColumn(current, String(id));
     if (!column) return null;
     const index = isColumn(id) ? current[column].length - 1 : current[column].indexOf(String(id));
@@ -133,7 +147,7 @@ export function KanbanBoard({
   };
 
   function onDragStart({ active }: DragStartEvent) {
-    snapshot.current = columns;
+    snapshot.current = latestColumns.current;
     setActiveId(String(active.id));
   }
 
@@ -141,13 +155,12 @@ export function KanbanBoard({
   function onDragOver({ active, over }: DragOverEvent) {
     if (!over) return;
     const id = String(active.id);
-    setColumns((current) => {
-      const from = findColumn(current, id);
-      const to = isColumn(over.id) ? over.id : findColumn(current, String(over.id));
-      if (!from || !to || from === to) return current;
-      const index = isColumn(over.id) ? current[to].length : current[to].indexOf(String(over.id));
-      return moveTaskInColumns(current, id, to, index);
-    });
+    const current = latestColumns.current;
+    const from = findColumn(current, id);
+    const to = isColumn(over.id) ? over.id : findColumn(current, String(over.id));
+    if (!from || !to || from === to) return;
+    const index = isColumn(over.id) ? current[to].length : current[to].indexOf(String(over.id));
+    applyColumns(moveTaskInColumns(current, id, to, index));
   }
 
   function onDragEnd({ active, over }: DragEndEvent) {
@@ -158,7 +171,7 @@ export function KanbanBoard({
     if (!before) return;
 
     // 同じ列の中での並べ替えを確定する
-    let next = columns;
+    let next = latestColumns.current;
     const column = findColumn(next, id);
     if (column && over && !isColumn(over.id)) {
       const from = next[column].indexOf(id);
@@ -170,15 +183,15 @@ export function KanbanBoard({
     const index = next[column].indexOf(id);
     const originalColumn = findColumn(before, id);
     if (originalColumn === column && before[column].indexOf(id) === index) {
-      setColumns(before);
+      applyColumns(before);
       return;
     }
 
-    setColumns(next);
+    applyColumns(next);
     startTransition(async () => {
       const result = await moveTaskAction(id, { status: column, index });
       if (!result.ok) {
-        setColumns(before);
+        applyColumns(before);
         toast.error(result.error);
       }
       router.refresh();
@@ -186,7 +199,7 @@ export function KanbanBoard({
   }
 
   function onDragCancel() {
-    if (snapshot.current) setColumns(snapshot.current);
+    if (snapshot.current) applyColumns(snapshot.current);
     snapshot.current = null;
     setActiveId(null);
   }

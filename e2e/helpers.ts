@@ -38,3 +38,16 @@ export async function createProject(page: Page, name: string) {
   await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
   return page.url();
 }
+
+/**
+ * 操作（action）で送信される Server Action の応答を待つ。
+ * 保存の直後に再読み込み・画面移動するテストで使う。waitForLoadState("networkidle") は
+ * 読み込み済みのページではすぐに返り、操作の後に始まる保存を待たないため、保存前に再読み込みしてしまうことがある。
+ */
+export async function waitForServerAction(page: Page, action: () => Promise<unknown>) {
+  const saved = page.waitForResponse(
+    (res) => res.request().method() === "POST" && res.request().headers()["next-action"] !== undefined,
+  );
+  await action();
+  await saved;
+}

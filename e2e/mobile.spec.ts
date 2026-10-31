@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { createProject, register } from "./helpers";
+import { createProject, register, waitForServerAction } from "./helpers";
 
 test("スマートフォンでもサイドバー（ドロワー）から画面を移動し、プロジェクトを作成できる", async ({ page }) => {
   await register(page, "E2E モバイル");
@@ -81,9 +81,8 @@ test("スマートフォンでは長押ししてからドラッグするとカ�
   expect(await titles()).toEqual(["一番目", "二番目"]);
 
   // 長押し（200ms 以上）してから動かすとドラッグになる
-  await touchDrag(page, start, end, 350);
+  await waitForServerAction(page, () => touchDrag(page, start, end, 350));
   await expect.poll(titles).toEqual(["二番目", "一番目"]);
-  await page.waitForLoadState("networkidle");
   await page.reload();
   await expect.poll(titles).toEqual(["二番目", "一番目"]);
 });
