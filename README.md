@@ -26,7 +26,7 @@
 |---|---|
 | フレームワーク | Next.js 16（App Router、Server Components、Server Actions） |
 | 言語 / UI | TypeScript 5.9、React 19、Tailwind CSS v4、shadcn/ui、Lucide React |
-| DB / ORM | PostgreSQL 17、Prisma 7（`@prisma/adapter-pg`） |
+| DB / ORM | PostgreSQL 18、Prisma 7（`@prisma/adapter-pg`） |
 | 認証 | Better Auth（メール＋パスワード、DB セッション） |
 | バリデーション / フォーム | Zod 4、React Hook Form |
 | ドラッグ＆ドロップ | dnd-kit（core / sortable） |

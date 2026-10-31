@@ -19,6 +19,28 @@ GitHub (main) ──▶ GitHub Actions「Database migration」（手動実行・
 GitHub (他ブランチ) ──▶ Vercel Preview ──▶ Neon Preview ブランチ（Pooled）
 ```
 
+### PostgreSQL のバージョン
+
+すべての環境で **PostgreSQL 18** を使います（2026-10-31 に 17 から変更）。
+
+| 環境 | PostgreSQL | 指定している場所 |
+|---|---|---|
+| 本番（Neon の `production` ブランチ） | 18 | Neon のプロジェクト作成時に決まる（プロジェクト `nameless-flower-97327417`） |
+| Preview（Neon の Preview ブランチ） | 18 | ブランチは同じプロジェクトのバージョンを使う |
+| ローカル（Docker） | 18 | `docker-compose.yml` の `postgres:18-alpine` |
+| CI（GitHub Actions のサービスコンテナ） | 18 | `.github/workflows/ci.yml` の `postgres:18-alpine`（統合テスト・E2E の 2 か所） |
+
+- Prisma 7 は PostgreSQL 18 に対応している（Prisma の公式の対応表で確認）
+- メジャーバージョンを上げる場合は、Neon・`docker-compose.yml`・`ci.yml` を同時に変更し、ローカルと CI のテストで確認する
+
+### ローカルの PostgreSQL（Docker のボリューム）
+
+- PostgreSQL 18 以降の公式イメージは、データを `/var/lib/postgresql/18/docker` に置き、ボリュームを `/var/lib/postgresql` にマウントする（17 以前は `/var/lib/postgresql/data`）
+- メジャーバージョンが違うとデータの形式が異なり、17 のデータを 18 でそのまま開けない。そのため、18 では新しいボリューム `project-management-app_pgdata18` を使う
+- 17 のときのボリューム `project-management-app_pgdata` は**削除せずに残している**。17 の開発用 DB の内容は、`pg_dump` で取り出して 18 の開発用 DB に復元済み（テスト用 DB はテストのたびに作り直すため復元していない）
+- 旧ボリュームが不要になったら、各自の判断で削除する: `docker volume rm project-management-app_pgdata`（元に戻せない）
+- 新しく環境を作る場合は `docker compose up -d` だけでよい（初回起動時にテスト用 DB も作成される）
+
 ### 実行環境の判定
 
 アプリは Vercel が設定する `VERCEL_ENV` で環境を判定します（`src/lib/env.ts`）。
@@ -39,7 +61,7 @@ GitHub (他ブランチ) ──▶ Vercel Preview ──▶ Neon Preview ブラ�
 
 ### 2.1 プロジェクトとブランチ
 
-1. Neon でプロジェクトを作成する。リージョンは利用者に近い場所を選び、**Vercel の関数のリージョンも同じか最も近い場所に設定する**（5 章）。PostgreSQL のバージョンはローカル・CI と同じ 17 にする
+1. Neon でプロジェクトを作成する。リージョンは利用者に近い場所を選び、**Vercel の関数のリージョンも同じか最も近い場所に設定する**（5 章）。PostgreSQL のバージョンは **18**（作成済みの本番プロジェクトが 18。ローカル・CI も 18 に統一している。1 章「PostgreSQL のバージョン」）
 2. 既定のブランチを**本番ブランチ**とする
 3. **本番にユーザーデータが入る前に**、本番ブランチから Preview 用のブランチ（例: `preview`）を作成する
    - Neon のブランチは作成時点の作成元のデータをそのまま引き継ぐため（コピーオンライト。物理的な全件コピーはしないが、データは見える）、公開後に本番から作り直すと本番ユーザーの個人情報が Preview に入ってしまう。**公開後に Preview ブランチを本番から作り直さないこと**（作り直す場合は、スキーマのみのブランチを作成するか、作成後にデータを全削除する）

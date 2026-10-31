@@ -73,6 +73,16 @@
 | 4 | 本番での確認: 再設定メールのリンク、429（IP アドレスの取得）、ヘッダー、実機（iOS Safari 等）のタッチ操作 |
 | 5 | デモアカウントの方式、アーキテクチャ図・Server Actions 一覧（Phase 5 の残り） |
 
+### 2026-10-31: PostgreSQL 18 への統一
+
+既存の Neon の本番プロジェクト（`nameless-flower-97327417`、シンガポール）が PostgreSQL 18 だったため、ローカル（Docker）と CI を 17 から 18 に変更した（Neon には接続・変更していない）。
+
+- `docker-compose.yml`: `postgres:18-alpine`。18 の公式イメージはデータの場所が変わり（`/var/lib/postgresql/18/docker`）、17 のデータは使えないため、新しいボリューム `pgdata18`（マウント先 `/var/lib/postgresql`）に変更。**17 のボリューム `project-management-app_pgdata` は削除せずに残している**。17 の開発用 DB は `pg_dump` で取り出して 18 に復元した（件数・マイグレーション履歴・トリガーが一致することを確認）
+- `.github/workflows/ci.yml`: 統合テスト・E2E のサービスコンテナを `postgres:18-alpine` に変更
+- 文書: deployment.md（PostgreSQL のバージョン、ローカルのボリューム）、design.md、README
+
+テスト結果（PostgreSQL 18.6）: lint・型チェック・ビルド成功、単体 187 件・統合 89 件・E2E 25 件成功。空のテスト用 DB に 2 つのマイグレーションを最初から適用できることも確認した。なお、Phase 1 の報告にある「PostgreSQL 17」は当時の記録として残している。
+
 ---
 
 ## Phase 4: 品質向上（2026-10-31 完了）

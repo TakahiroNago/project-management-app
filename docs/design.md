@@ -34,7 +34,7 @@
 | 言語 | typescript | 5.9.3 | 7.x（Go 移植版）は ESLint / Next.js との互換性を優先して見送り |
 | CSS | tailwindcss | 4.3.3 | CSS ファースト設定 |
 | UI 部品 | shadcn (CLI) / radix-ui | 4.23.0 / 1.8.1 | プリセット `radix-nova`。生成コードは `src/components/ui` |
-| DB | PostgreSQL | 17 | ローカルは Docker、本番は Neon（[deployment.md](./deployment.md)） |
+| DB | PostgreSQL | 18 | 本番（Neon）・ローカル（Docker）・CI で統一（2026-10-31 に 17 から変更。[deployment.md](./deployment.md)） |
 | ORM | prisma / @prisma/client / @prisma/adapter-pg | **7.10.1** | npm の `latest` タグは 8.0.0-rc のため明示的に 7.10.1 を指定 |
 | 認証 | better-auth | 1.7.14 | Auth.js から変更（2.2 参照）。Prisma アダプタは同梱 |
 | 検証 | zod | 4.6.7 | v4 API（`error` パラメータ） |
