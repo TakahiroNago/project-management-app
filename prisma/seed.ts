@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { hashPassword } from "better-auth/crypto";
 import { PrismaClient } from "../src/generated/prisma/client";
+import { isLocalDatabaseUrl } from "../src/lib/database-url";
 
 const DEMO_USERS = [
   { email: "demo@example.com", name: "デモユーザー", password: "demo-password" },
@@ -20,6 +21,10 @@ const date = (value: string) => new Date(`${value}T00:00:00.000Z`);
 async function main() {
   if (process.env.NODE_ENV === "production") {
     throw new Error("Seeding is disabled in production.");
+  }
+  // 固定パスワードのユーザーを作るため、ローカル（Docker）の DB 以外では実行しない（本番・Preview の DB を守る）
+  if (!process.env.DATABASE_URL || !isLocalDatabaseUrl(process.env.DATABASE_URL)) {
+    throw new Error("Seeding is allowed only for a local database (localhost).");
   }
   const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }) });
 

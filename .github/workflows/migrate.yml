@@ -1,0 +1,150 @@
+name: Database migration
+
+# 本番・Preview の DB へのマイグレーション（手動実行のみ）。
+# production は GitHub Environment「production」の承認（Required reviewers）が必要。
+# 成功した場合だけ、Vercel の Deploy Hook で本番デプロイを開始する。
+# 手順・Secrets の設定は docs/deployment.md を参照。
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: マイグレーションを適用する環境
+        type: choice
+        options: [preview, production]
+        required: true
+      deploy:
+        description: 成功後に本番デプロイを開始する（production のみ）
+        type: boolean
+        default: true
+
+# contents: 読み取りのみ。actions: Environment の保護ルールの読み取り（scripts/release-guard.ts）
+permissions:
+  contents: read
+  actions: read
+
+# 同じ環境へのマイグレーションは同時に実行しない（途中で打ち切らない）
+concurrency:
+  group: migrate-${{ inputs.target }}
+  cancel-in-progress: false
+
+env:
+  TARGET: ${{ inputs.target }}
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  # 承認・Secrets を伴うジョブの前に、Secrets を使わずに前提条件を検査する。
+  # 失敗した場合、migrate ジョブ（Environment・Secrets を使う）は開始されない
+  preflight:
+    name: Preflight (${{ inputs.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require main branch for production
+        if: inputs.target == 'production' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Production migrations can only be run from the main branch."
+          exit 1
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+
+      - name: Check production environment protection
+        if: inputs.target == 'production'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npx tsx scripts/release-guard.ts environment-protection
+
+      - name: Check that main has not moved
+        if: inputs.target == 'production'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npx tsx scripts/release-guard.ts commit-is-head
+
+  migrate:
+    name: Migrate (${{ inputs.target }})
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Environment ごとの Secret（DIRECT_URL）を使う。production は承認されるまでここで待機する
+    environment: ${{ inputs.target }}
+    steps:
+      - name: Require main branch for production
+        if: inputs.target == 'production' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Production migrations can only be run from the main branch."
+          exit 1
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      # DB の接続情報はこのステップには渡さない（postinstall の prisma generate は接続不要）
+      - run: npm ci
+
+      # 公開リポジトリのログは誰でも閲覧できるため、以降のステップの出力から DB のホスト名を伏せる
+      - name: Mask database host
+        env:
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          PRODUCTION_DB_ENDPOINT_ID: ${{ vars.PRODUCTION_DB_ENDPOINT_ID }}
+        run: npx tsx scripts/mask-database-host.ts
+
+      - name: Check migration target
+        env:
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          PRODUCTION_DB_ENDPOINT_ID: ${{ vars.PRODUCTION_DB_ENDPOINT_ID }}
+        run: npx tsx scripts/check-migration-target.ts "$TARGET"
+
+      # 承認待ちの間に保護ルールが変更されていないか、main が進んでいないかを、マイグレーションの直前に再確認する
+      - name: Check production environment protection
+        if: inputs.target == 'production'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npx tsx scripts/release-guard.ts environment-protection
+
+      - name: Check that main has not moved (before migration)
+        if: inputs.target == 'production'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npx tsx scripts/release-guard.ts commit-is-head
+
+      - name: Show migration status
+        env:
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+        # 未適用のマイグレーションがあると終了コード 1 になるため、ここでは失敗扱いにしない
+        run: npx prisma migrate status || true
+
+      # 失敗するとここでジョブが止まり、以降のマイグレーションとデプロイは実行されない。
+      # 失敗は _prisma_migrations に記録され、解決するまで migrate deploy は再実行できない。
+      # 復旧手順は docs/deployment.md「マイグレーション失敗時」
+      - name: Apply migrations
+        env:
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+        run: npx prisma migrate deploy
+
+      # Deploy Hook は main の最新コミットをデプロイするため、呼び出す直前にもう一度確認する
+      - name: Check that main has not moved (before deployment)
+        if: inputs.target == 'production' && inputs.deploy
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npx tsx scripts/release-guard.ts commit-is-head
+
+      - name: Trigger production deployment
+        if: inputs.target == 'production' && inputs.deploy
+        env:
+          VERCEL_DEPLOY_HOOK_URL: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$VERCEL_DEPLOY_HOOK_URL" ]; then
+            echo "::warning::VERCEL_DEPLOY_HOOK_URL is not set. Skipped the production deployment."
+            exit 0
+          fi
+          curl --fail --silent --show-error --max-time 30 -X POST "$VERCEL_DEPLOY_HOOK_URL" > /dev/null
+          echo "Production deployment has been triggered for ${GITHUB_SHA::7}."

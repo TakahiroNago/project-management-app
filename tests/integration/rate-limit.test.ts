@@ -37,6 +37,13 @@ describe("レート制限が有効になる条件", () => {
     expect(isAuthRateLimitEnabled({ NODE_ENV: "development" })).toBe(false);
     expect(isAuthRateLimitEnabled({ NODE_ENV: "test" })).toBe(false);
   });
+
+  it("Vercel の Production / Preview では常に有効で、DISABLE_AUTH_RATE_LIMIT でも無効にできない", () => {
+    for (const VERCEL_ENV of ["production", "preview"]) {
+      expect(isAuthRateLimitEnabled({ VERCEL_ENV, NODE_ENV: "production" })).toBe(true);
+      expect(isAuthRateLimitEnabled({ VERCEL_ENV, NODE_ENV: "production", DISABLE_AUTH_RATE_LIMIT: "true" })).toBe(true);
+    }
+  });
 });
 
 describe("認証エンドポイントのレート制限（本番と同じルール）", () => {

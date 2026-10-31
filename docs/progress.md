@@ -1,5 +1,80 @@
 # 進捗・フェーズ報告
 
+## Phase 5: 公開（実施中）
+
+### 2026-10-31: 本番環境の設定・マイグレーションの仕組み（外部サービスの設定・接続・デプロイは未実施）
+
+#### 実装内容
+
+- **環境の判定と起動時の検証**: `VERCEL_ENV` で production / preview / local を判定（`src/lib/env.ts`）。Production / Preview では `instrumentation.ts` で必須の環境変数を検証し、不足・誤設定なら起動しない（メッセージは変数名のみ）
+- **DB の分離**: Production は本番ブランチ、Preview は本番以外のブランチでなければ起動・接続しない（`PRODUCTION_DB_ENDPOINT_ID` と比較。起動時と `db.ts` の 2 か所）。アプリの `DATABASE_URL` は Pooled Connection に限定
+- **Prisma CLI の接続先**（`prisma/migration-url.ts`）: リモートは `DIRECT_URL` のみ。Pooled ならエラー、`DIRECT_URL` が無ければ接続先なし。`prisma generate` は接続先なしで成功
+- **Better Auth**: Production は `BETTER_AUTH_URL` のみ信頼。Preview はそのデプロイ自身の URL だけを baseURL・信頼済みオリジンにする（ワイルドカードなし）。レート制限は Vercel 上では常に有効
+- **Preview のメール**: 許可リスト（`PREVIEW_MAIL_ALLOWED_RECIPIENTS`）の宛先にだけ送信
+- **GitHub Actions**: `migrate.yml`（手動実行・Environment の承認・接続先の検査・`migrate deploy`・成功時のみ Deploy Hook）。`vercel.json` で main の自動デプロイを無効化
+- **その他**: Node.js を `24.x` に統一、シードは localhost の DB でのみ実行可能、テストのマイグレーションで `DIRECT_URL` もテスト用 DB に上書き
+- **文書**: [deployment.md](./deployment.md)（Neon・Vercel・Resend・GitHub の設定、秘密鍵の生成、リリース手順、バックアップ・復旧、マイグレーション失敗時の対応）
+
+#### テスト結果
+
+| 種類 | 結果 |
+|---|---|
+| lint / 型チェック / ビルド | 成功 |
+| 単体テスト | 143 件成功（+50。環境変数の検証、DB の分離、Origin、マイグレーションの接続先、Preview のメール） |
+| 統合テスト | 89 件成功（+1。Vercel 上でレート制限を無効にできないこと） |
+| E2E テスト | 25 件成功 |
+| カバレッジ（単体 + 統合） | 行 86.4%、分岐 91.0% |
+
+手動での確認（ダミーの接続文字列を使用。外部には接続していない）:
+
+- `DATABASE_URL` が Pooled で `DIRECT_URL` なし → `prisma generate` 成功、`prisma migrate deploy` は「datasource.url が必要」で停止
+- `DIRECT_URL` が Pooled → Prisma の設定の読み込み時にエラーで停止（接続文字列はメッセージに含まれない）
+- `VERCEL_ENV=production` で必須の変数が不足した状態で `next start` → HTTP 500、ログは変数名のみ
+- `scripts/check-migration-target.ts`: preview に本番の接続文字列を指定するとエラー、production に本番を指定すると成功
+- リモートの `DATABASE_URL` でシードを実行するとエラーで停止
+
+### 2026-10-31: コミット前レビューの指摘への対応（M1・M2・R1〜R7）
+
+#### 実装内容
+
+- **M1（デプロイするコミットの整合性）**: 実行中のコミット（`GITHUB_SHA`）が main の最新と一致するかを GitHub API で確認し、一致しなければ停止（preflight、マイグレーション直前、Deploy Hook 直前の 3 回）。Deploy Hook の受付から Vercel のコミット取得までの競合は運用（リリース中は main へマージしない・デプロイされたコミットの確認）で防ぐ（deployment.md 7 章）
+- **M2（production Environment の保護）**: Secrets を使わない preflight ジョブで、Required reviewers（承認者 1 人以上）と、デプロイ元ブランチが main のみであることを確認。Environment が無い・API のエラー・通信エラー・想定外の応答でも停止。マイグレーション直前にも再確認
+- **R1**: DB のホスト名・エンドポイント ID を Actions のログで伏せ字にする（`scripts/mask-database-host.ts`）
+- **R2**: `inputs.target` を環境変数 `TARGET` で渡す
+- **R3**: checkout は `persist-credentials: false`。`actions/checkout`・`actions/setup-node` をコミット SHA（v4.4.0）で固定
+- **R4**: Vercel 上（`VERCEL=1`）で `VERCEL_ENV` が想定外なら preview として扱う。環境を判定できない本番ビルドがリモートの DB に接続するのを拒否
+- **R5**: リモートの DB に対する `prisma migrate dev` / `migrate reset` / `db push` を拒否
+- **R6・R7**: deployment.md に Preview の DB の共有・マイグレーションの取り消し・復旧手順、本番の `*.vercel.app` の URL ではログインできないこと、Vercel の Node.js 24.x 設定を追記
+
+#### テスト結果
+
+| 種類 | 結果 |
+|---|---|
+| lint / 型チェック / ビルド | 成功 |
+| 単体テスト | 187 件成功（+44。M1・M2 の正常系と異常系、R4、R5、ログの伏せ字） |
+| 統合テスト | 89 件成功 |
+| E2E テスト | 25 件成功 |
+| カバレッジ（単体 + 統合） | 行 87.7%、分岐 91.5% |
+
+手動での確認（外部には接続していない）:
+
+- `scripts/release-guard.ts` をローカルの疑似 GitHub API に対して実行: 正常系は成功。Environment なし（404）・承認者なし・ブランチ制限なし・API のエラー（500 / 502）・通信エラー・main が進んでいる・`GITHUB_SHA` なし・不明なコマンドはすべて終了コード 1
+- `migrate.yml` を構文解析し、入力の全組み合わせ（target × ブランチ × deploy）と途中のステップの失敗で、実行されるステップを検査（production を main 以外から実行すると preflight で停止、検査の失敗後にマイグレーション・Deploy Hook が実行されない、Deploy Hook の直前に main を再確認、Action の SHA 固定、`run` に式を直接埋め込まない、など）
+- Prisma CLI（ダミーの URL）: `generate` は接続先なしで成功。`DIRECT_URL` なし・Pooled、リモートへの `migrate dev` / `migrate reset` / `db push`、リモートへのシードはすべて停止
+- `next start`: Vercel の環境変数なし＋リモートの DB、`VERCEL=1`＋想定外の `VERCEL_ENV` はいずれも HTTP 500 で停止（ログに接続文字列なし）。ローカルの DB では通常どおり起動
+
+#### 残課題（利用者の作業が必要なもの）
+
+| # | 内容 |
+|---|---|
+| 1 | Neon・Vercel・Resend・GitHub の設定（[deployment.md の 9 章のチェックリスト](./deployment.md#9-公開前のチェックリスト)） |
+| 2 | Deploy Hook で、`vercel.json` で自動デプロイを止めた main の本番デプロイが作成されることの確認（初回） |
+| 3 | `GITHUB_TOKEN`（`actions: read`）で Environment の保護ルールを読み取れることの確認（読み取れない場合は安全側で停止する） |
+| 4 | 本番での確認: 再設定メールのリンク、429（IP アドレスの取得）、ヘッダー、実機（iOS Safari 等）のタッチ操作 |
+| 5 | デモアカウントの方式、アーキテクチャ図・Server Actions 一覧（Phase 5 の残り） |
+
+---
+
 ## Phase 4: 品質向上（2026-10-31 完了）
 
 ### 実装内容

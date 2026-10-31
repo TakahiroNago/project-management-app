@@ -3,8 +3,10 @@ import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { nextCookies } from "better-auth/next-js";
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/features/auth/schemas";
+import { resolveAuthOrigins } from "@/lib/auth/origins";
 import { runInBackground } from "@/lib/background";
 import { db } from "@/lib/db";
+import { getDeploymentEnv } from "@/lib/env";
 import { sendPasswordResetEmail } from "@/lib/mail";
 
 /** パスワード再設定トークンの有効期限（秒） */
@@ -20,16 +22,22 @@ export const AUTH_RATE_LIMIT_RULES = {
 };
 
 /**
- * レート制限を有効にするか。本番ビルドでのみ有効。
- * E2E テスト（短時間に多数のユーザーを登録する）でのみ DISABLE_AUTH_RATE_LIMIT=true で無効化する
- * （本番環境には設定しないこと）。
+ * レート制限を有効にするか。
+ * - Vercel の Production / Preview: 常に有効（DISABLE_AUTH_RATE_LIMIT は無視し、起動時の検証でも拒否する）
+ * - それ以外: 本番ビルド（next start）でのみ有効。E2E テスト（短時間に多数のユーザーを登録する）でのみ
+ *   DISABLE_AUTH_RATE_LIMIT=true で無効化する
  */
-export function isAuthRateLimitEnabled(env: { NODE_ENV?: string; DISABLE_AUTH_RATE_LIMIT?: string }) {
+export function isAuthRateLimitEnabled(env: Record<string, string | undefined>) {
+  if (getDeploymentEnv(env) !== "local") return true;
   return env.NODE_ENV === "production" && env.DISABLE_AUTH_RATE_LIMIT !== "true";
 }
 
+const { baseURL, trustedOrigins } = resolveAuthOrigins(process.env);
+
 export const auth = betterAuth({
   appName: "ProjectFlow",
+  baseURL,
+  trustedOrigins,
   database: prismaAdapter(db, { provider: "postgresql" }),
 
   emailAndPassword: {

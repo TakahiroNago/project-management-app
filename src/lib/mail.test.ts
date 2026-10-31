@@ -67,6 +67,56 @@ describe("sendPasswordResetEmail", () => {
     expect(logs()).not.toContain("SECRET_TOKEN_123");
   });
 
+  describe("Preview", () => {
+    const previewEnv = {
+      VERCEL_ENV: "preview",
+      NODE_ENV: "production",
+      RESEND_API_KEY: "re_preview",
+      MAIL_FROM: "ProjectFlow <no-reply@mail.example.com>",
+    };
+
+    it("許可リストに無い宛先には送信せず、宛先・URL をログに出さない", async () => {
+      const logs = capturedLogs();
+      const { sendPasswordResetEmail } = await loadMail({ ...previewEnv, PREVIEW_MAIL_ALLOWED_RECIPIENTS: "dev@example.com" });
+      expect(await sendPasswordResetEmail(mail)).toBe(false);
+      expect(send).not.toHaveBeenCalled();
+      expect(logs()).toContain("not in PREVIEW_MAIL_ALLOWED_RECIPIENTS");
+      expect(logs()).not.toContain("user@example.com");
+      expect(logs()).not.toContain("SECRET_TOKEN_123");
+    });
+
+    it("許可リストが未設定なら誰にも送信しない", async () => {
+      capturedLogs();
+      const { sendPasswordResetEmail } = await loadMail({ ...previewEnv, PREVIEW_MAIL_ALLOWED_RECIPIENTS: "" });
+      expect(await sendPasswordResetEmail(mail)).toBe(false);
+      expect(send).not.toHaveBeenCalled();
+    });
+
+    it("許可リストの宛先には送信する（大文字小文字・空白は無視）", async () => {
+      capturedLogs();
+      send.mockResolvedValue({ data: { id: "1" }, error: null });
+      const { sendPasswordResetEmail } = await loadMail({
+        ...previewEnv,
+        PREVIEW_MAIL_ALLOWED_RECIPIENTS: "dev@example.com, User@Example.com",
+      });
+      expect(await sendPasswordResetEmail(mail)).toBe(true);
+      expect(send).toHaveBeenCalledWith(expect.objectContaining({ to: "user@example.com" }));
+    });
+
+    it("許可された宛先でも API キーが無ければ送信せず、URL をコンソールに出さない", async () => {
+      const logs = capturedLogs();
+      const { sendPasswordResetEmail } = await loadMail({
+        VERCEL_ENV: "preview",
+        NODE_ENV: "production",
+        RESEND_API_KEY: "",
+        MAIL_FROM: "",
+        PREVIEW_MAIL_ALLOWED_RECIPIENTS: "user@example.com",
+      });
+      expect(await sendPasswordResetEmail(mail)).toBe(false);
+      expect(logs()).not.toContain("SECRET_TOKEN_123");
+    });
+  });
+
   it.each([
     ["Resend がエラーを返した場合", () => send.mockResolvedValue({ data: null, error: { name: "validation_error", message: "Invalid from" } })],
     ["通信で例外が発生した場合", () => send.mockRejectedValue(new Error("network down"))],

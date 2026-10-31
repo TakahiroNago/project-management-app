@@ -34,7 +34,7 @@
 | 言語 | typescript | 5.9.3 | 7.x（Go 移植版）は ESLint / Next.js との互換性を優先して見送り |
 | CSS | tailwindcss | 4.3.3 | CSS ファースト設定 |
 | UI 部品 | shadcn (CLI) / radix-ui | 4.23.0 / 1.8.1 | プリセット `radix-nova`。生成コードは `src/components/ui` |
-| DB | PostgreSQL | 17 | ローカルは Docker、本番は Neon を予定 |
+| DB | PostgreSQL | 17 | ローカルは Docker、本番は Neon（[deployment.md](./deployment.md)） |
 | ORM | prisma / @prisma/client / @prisma/adapter-pg | **7.10.1** | npm の `latest` タグは 8.0.0-rc のため明示的に 7.10.1 を指定 |
 | 認証 | better-auth | 1.7.14 | Auth.js から変更（2.2 参照）。Prisma アダプタは同梱 |
 | 検証 | zod | 4.6.7 | v4 API（`error` パラメータ） |
@@ -133,6 +133,13 @@ flowchart LR
 | 更新履歴の記録 | タスク更新・カンバン移動・メンバー削除（担当解除）と**同一トランザクション**で記録。差分算出は `src/domain/activity.ts`。担当者はユーザー ID で記録し、表示時に名前を解決 | 更新が失敗したら履歴も残らない。ユーザー名の変更後も最新の名前で表示できる |
 | 期限の表示 | 期限切れ（赤）・今日・3 日以内（黄）を、色だけでなくアイコンと「あと N 日」「N 日超過」の文言でも示す | 色覚の個人差への配慮 |
 | `loading.tsx` | ダッシュボードのみに配置 | `[projectId]` より上位に置くとストリーミングが先に始まり、`notFound()` 時に HTTP 404 を返せなくなるため（E2E で検出） |
+| 実行環境の判定 | Vercel の `VERCEL_ENV` で production / preview / local を判定（`src/lib/env.ts`）。`NODE_ENV` は E2E・CI の `next start` でも production になるため、本番固有の制御には使わない。Vercel 上（`VERCEL=1`）で想定外の値なら preview として扱い、環境を判定できない本番ビルドがリモートの DB に接続するのは拒否する | ローカルの本番ビルドでのテストと、Vercel の本番を区別するため。判定できない場合は制限の厳しい側に倒す |
+| 起動時の環境変数検証 | `instrumentation.ts` の `register()` で検証し、不足・誤設定なら例外で起動を止める。メッセージは変数名のみ | 設定漏れ（メールが送られない、レート制限が無効など）に気付かないまま公開されるのを防ぐ。`register()` の完了前はリクエストを受け付けない（Next.js の仕様） |
+| 本番 DB と Preview DB の分離 | Neon のブランチで分離し、Preview 専用ロールで認証情報も分ける。加えて、アプリは `PRODUCTION_DB_ENDPOINT_ID` と接続先のエンドポイントを比べ、Preview から本番 DB への接続（と本番から Preview DB への接続）を拒否する（起動時と `db.ts` の接続作成時の 2 か所） | Vercel の環境変数の設定ミスだけで本番 DB に接続されないよう、多重に防ぐ |
+| Prisma CLI の接続先 | Prisma 7 では `directUrl` が廃止されたため、`prisma.config.ts` の `datasource.url` を `prisma/migration-url.ts` で決める。リモートは `DIRECT_URL` のみ（Pooled ならエラー）。リモートへの `migrate dev` / `migrate reset` / `db push` は拒否。`env()`（未設定で例外）は使わない | マイグレーションを Pooled Connection で実行しない。Vercel のビルド（`DIRECT_URL` なし）で `prisma generate` を失敗させない |
+| 本番マイグレーション | GitHub Actions の手動実行（`workflow_dispatch`）＋ Environment の承認。Secrets を使わない preflight ジョブで、Environment の保護ルール（承認者・main のみ）と「実行中のコミット = main の最新」を GitHub API で確認してから開始し、マイグレーション直前と Deploy Hook 直前にも再確認する（確認できない場合は停止）。成功後に Deploy Hook で本番デプロイ。`vercel.json` で main の自動デプロイは無効化 | 本番の接続情報は承認されたジョブだけが参照する。保護ルールの設定漏れ（存在しない Environment は保護なしで自動作成される）でも承認なしで動かさない。Deploy Hook はコミットを指定できず main の最新をデプロイするため、マイグレーションしていないコミットのデプロイを防ぐ（数秒の競合は運用で防ぐ。deployment.md 7 章） |
+| Preview の認証 URL | `BETTER_AUTH_URL` は設定せず、そのデプロイの `VERCEL_BRANCH_URL` / `VERCEL_URL` だけを baseURL・信頼済みオリジンにする | ワイルドカードの Origin を許可せずに Preview でログインできる。再設定メールのリンクが本番ドメインを指さない |
+| Preview のメール | `PREVIEW_MAIL_ALLOWED_RECIPIENTS` に完全一致する宛先にだけ送信（未設定なら送信しない） | Preview から本番ユーザーにメールを送らない |
 
 ### 3.4 認証・セキュリティ設計
 
@@ -145,7 +152,7 @@ flowchart LR
 | パスワード再設定 | トークン有効期限 30 分、使い捨て（使用時に削除）、**再設定時に全セッションを無効化**（`revokeSessionsOnPasswordReset: true`） |
 | 再設定メール | 本番は Resend。開発は `RESEND_API_KEY` 未設定時のみコンソールに URL を出力。**本番では URL・トークンをログに出さない**。送信は `after()` でレスポンス後に実行し、送信失敗はログのみ（利用者には常に同じ応答を返し、登録有無を推測させない） |
 | パスワード変更 | 現在のパスワードを確認し、他端末のセッションを無効化（`revokeOtherSessions`） |
-| レート制限 | Better Auth のレート制限を DB 保存で有効化（本番のみ）。ログイン 10 回/分、登録 5 回/分、再設定メール 3 回/5 分 など（`AUTH_RATE_LIMIT_RULES`）。IP アドレス単位で、IP は `X-Forwarded-For` から取得するため、**この値をプラットフォームが上書きする環境（Vercel 等）で動かすことが前提** |
+| レート制限 | Better Auth のレート制限を DB 保存で有効化（Vercel の Production / Preview では常に有効で、`DISABLE_AUTH_RATE_LIMIT` は起動時に拒否。ローカルは `next start` のときのみ）。ログイン 10 回/分、登録 5 回/分、再設定メール 3 回/5 分 など（`AUTH_RATE_LIMIT_RULES`）。IP アドレス単位で、IP は `X-Forwarded-For` から取得するため、**この値をプラットフォームが上書きする環境（Vercel 等）で動かすことが前提** |
 | CSRF | Server Actions は Next.js の Origin 検証。`/api/auth/*` は Better Auth の Origin 検証（テスト環境でも有効にするため `disableOriginCheck: false` を明示） |
 | オープンリダイレクト | 再設定メールのリダイレクト先は Better Auth が信頼済みオリジンのみ許可（統合テストで確認）。ログイン後の遷移先は固定（`/dashboard`） |
 | XSS | React のエスケープに任せ、`dangerouslySetInnerHTML` は使わない。説明・コメントはプレーンテキスト。加えて **nonce 付きの Content-Security-Policy**（`proxy.ts`）で、nonce のないスクリプト・インラインのイベントハンドラを実行させない（`script-src self nonce-… strict-dynamic`）。スタイルは Radix UI / dnd-kit が SSR で style 属性を出力するため `unsafe-inline` を許可 |
@@ -262,8 +269,9 @@ project-management-app/
 - エラー処理・ローディング UI の見直し、アクセシビリティ（カンバンのキーボード操作）
 - レスポンシブ・ダークモードの全画面確認
 
-### Phase 5: 公開
-- Neon 本番 DB、Vercel デプロイ（Git 連携で main への自動デプロイ）、Resend 設定
+### Phase 5: 公開 — **実施中**
+- Neon 本番 DB、Vercel デプロイ、Resend 設定（本番 URL: `https://projects.art-full-stack.com`。手順は [deployment.md](./deployment.md)）
+  - 本番デプロイは GitHub Actions のマイグレーション成功後に Deploy Hook で行う（当初の「main への自動デプロイ」から変更）
 - デモアカウント（データの定期リセット方式を検討）
 - README、ER 図、アーキテクチャ図、Server Actions 一覧（API 設計資料）
 

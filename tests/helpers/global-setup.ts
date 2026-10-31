@@ -12,7 +12,8 @@ export default function setup() {
     throw new Error("TEST_DATABASE_URL must differ from DATABASE_URL (tests delete all data).");
   }
   execSync("npx prisma migrate deploy", {
-    env: { ...process.env, DATABASE_URL: url },
+    // DIRECT_URL も上書きする（.env に DIRECT_URL があると、そちらにマイグレーションされてしまうため）
+    env: { ...process.env, DATABASE_URL: url, DIRECT_URL: url },
     stdio: "inherit",
   });
 }

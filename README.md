@@ -3,7 +3,8 @@
 個人開発者・小規模チーム（2〜10 人）向けのプロジェクト管理 Web アプリケーションです。
 プロジェクト単位でタスクを管理し、進捗・優先度・期限を把握できます。
 
-> **開発状況**: Phase 4（品質向上）まで完了。公開（本番環境・デモアカウント）は Phase 5 で実施予定です。
+> **開発状況**: Phase 4（品質向上）まで完了。Phase 5（公開）は本番環境の設定・マイグレーションの仕組みまで実装済みで、公開作業は未実施です。
+> 本番 URL（予定）: https://projects.art-full-stack.com
 > 詳細は [docs/progress.md](docs/progress.md) を参照してください。
 
 ## 主な機能（Phase 3 時点）
@@ -30,7 +31,8 @@
 | バリデーション / フォーム | Zod 4、React Hook Form |
 | ドラッグ＆ドロップ | dnd-kit（core / sortable） |
 | テスト | Vitest（単体・統合）、Playwright（E2E） |
-| CI | GitHub Actions |
+| CI / マイグレーション | GitHub Actions |
+| 本番環境 | Vercel、Neon（PostgreSQL）、Resend（メール） |
 
 バージョンはすべて `package.json` で固定しています。選定理由（Auth.js から Better Auth への変更など）は [docs/design.md](docs/design.md) を参照してください。
 
@@ -54,7 +56,7 @@
 
 ### 必要なもの
 
-- Node.js 24（`.nvmrc`。22.12 以上で動作）
+- Node.js 24.x（`.nvmrc`、`package.json` の `engines`）
 - Docker（PostgreSQL 用）
 
 ### 手順
@@ -84,11 +86,14 @@ npm run dev            # http://localhost:3000
 
 | 変数 | 説明 |
 |---|---|
-| `DATABASE_URL` | 開発・本番の DB 接続文字列 |
+| `DATABASE_URL` | アプリの DB 接続文字列（本番は Neon の Pooled Connection） |
+| `DIRECT_URL` | Prisma のマイグレーション用（Neon の Direct Connection）。ローカルでは不要 |
 | `TEST_DATABASE_URL` | 統合テスト・E2E 用 DB（テスト実行時にデータが削除されます。`DATABASE_URL` と同じ値は不可） |
 | `BETTER_AUTH_SECRET` | セッション署名用の秘密鍵（32 文字以上） |
 | `BETTER_AUTH_URL` | アプリの URL（例: `http://localhost:3000`） |
 | `RESEND_API_KEY` / `MAIL_FROM` | パスワード再設定メールの送信（本番では必須） |
+
+本番・Preview の環境変数（`PRODUCTION_DB_ENDPOINT_ID`、`PREVIEW_MAIL_ALLOWED_RECIPIENTS` を含む）と設定手順は [docs/deployment.md](docs/deployment.md) を参照してください。
 
 ## スクリプト
 
@@ -101,7 +106,7 @@ npm run dev            # http://localhost:3000
 | `npm run test:coverage` | 単体 + 統合テストのカバレッジ（`coverage/index.html`） |
 | `npm run test:integration` | 統合テスト（テスト用 DB にマイグレーションを適用してから実行） |
 | `npm run test:e2e` | E2E テスト（本番ビルドをポート 3100 で起動して実行。初回は `npx playwright install chromium`） |
-| `npm run db:migrate` / `db:deploy` / `db:seed` / `db:studio` | マイグレーション作成・適用 / 本番適用 / サンプルデータ / Prisma Studio |
+| `npm run db:migrate` / `db:deploy` / `db:seed` / `db:studio` | マイグレーション作成・適用 / 適用のみ / サンプルデータ（localhost のみ）/ Prisma Studio |
 
 ## ディレクトリ構成
 
@@ -114,10 +119,11 @@ src/
 ├── i18n/           # UI 文言・日付書式（将来の英語対応に備えて集約）
 ├── lib/            # DB、認証、エラー処理などの基盤
 └── proxy.ts
-prisma/             # スキーマ、マイグレーション、シード
+prisma/             # スキーマ、マイグレーション、シード、CLI の接続先の決定（migration-url.ts）
+scripts/            # GitHub Actions から実行するスクリプト
 tests/integration/  # 統合テスト（実 DB）
 e2e/                # E2E テスト
-docs/               # 設計書・ER 図・進捗報告
+docs/               # 設計書・ER 図・本番環境の手順・進捗報告
 ```
 
 ## CI
@@ -127,3 +133,5 @@ Pull Request と main への push で GitHub Actions が以下を実行します
 1. 依存関係のインストール → ESLint → 型チェック → 単体テスト → ビルド
 2. 統合テスト（PostgreSQL サービスコンテナ）
 3. E2E テスト（PostgreSQL サービスコンテナ + Chromium）
+
+本番 DB へのマイグレーションと本番デプロイは、手動実行・承認付きのワークフロー（[.github/workflows/migrate.yml](.github/workflows/migrate.yml)）で行います。手順は [docs/deployment.md](docs/deployment.md) を参照してください。
