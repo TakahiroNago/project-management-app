@@ -1,5 +1,5 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { createProject, register, waitForServerAction } from "./helpers";
+import { createProject, register, waitForQueuedTimers, waitForServerAction } from "./helpers";
 
 const column = (page: Page, status: "TODO" | "IN_PROGRESS" | "DONE") => page.getByTestId(`column-${status}`);
 const card = (page: Page, title: string) => page.locator(`[data-testid="kanban-card"][data-task-title="${title}"]`);
@@ -76,6 +76,9 @@ test("キーボードだけでカードを別の列へ移動できる", async ({
   await page.getByRole("button", { name: "タスク「キーボードで移動」を移動" }).focus();
   await page.keyboard.press("Space");
   await expect(announcer).toContainText(/持ち上げました（未着手、1番目）|未着手の1番目に移動中/);
+  // 読み上げは、矢印キーを受け付ける準備より先に出る（dnd-kit の KeyboardSensor は keydown リスナーを
+  // setTimeout で後から登録する）。登録が済むのを待ってから矢印キーを送る（waitForQueuedTimers の説明を参照）
+  await waitForQueuedTimers(page);
   await page.keyboard.press("ArrowRight");
   await expect(announcer).toContainText("進行中の1番目に移動中");
   await waitForServerAction(page, () => page.keyboard.press("Space"));
