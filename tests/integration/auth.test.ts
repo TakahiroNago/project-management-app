@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { USER_NAME_MAX } from "@/features/auth/schemas";
 import { auth } from "@/lib/auth/auth";
 import { db } from "@/lib/db";
 import { flushBackgroundTasks } from "../helpers/background";
@@ -219,6 +220,57 @@ describe("HTTP エンドポイント（CSRF 対策）", () => {
     );
     expect(response.status).toBe(200);
     expect(response.headers.get("set-cookie")).toMatch(/session_token=.*HttpOnly/i);
+  });
+});
+
+describe("登録・プロフィール更新の入力検証（API を直接呼んだ場合）", () => {
+  const origin = { origin: "http://localhost:3000" };
+
+  it("登録: 長すぎる名前・空白だけの名前・画像の URL は拒否され、ユーザーは作られない", async () => {
+    for (const body of [
+      { name: "a".repeat(USER_NAME_MAX + 1), email: "long-name@example.com", password: TEST_PASSWORD },
+      { name: "   ", email: "blank-name@example.com", password: TEST_PASSWORD },
+      { name: "画像あり", email: "image@example.com", password: TEST_PASSWORD, image: "https://evil.example.com/a.png" },
+    ]) {
+      const response = await postToAuthHandler("/sign-up/email", body, origin);
+      expect(response.status).toBe(400);
+    }
+    expect(await db.user.count()).toBe(0);
+  });
+
+  it("登録: 名前は前後の空白を除いて保存され、上限ちょうどの長さは登録できる", async () => {
+    const name = "あ".repeat(USER_NAME_MAX);
+    const response = await postToAuthHandler(
+      "/sign-up/email",
+      { name: `  ${name}  `, email: "max-name@example.com", password: TEST_PASSWORD },
+      origin,
+    );
+    expect(response.status).toBe(200);
+    expect(await db.user.findUniqueOrThrow({ where: { email: "max-name@example.com" } })).toMatchObject({ name });
+  });
+
+  it("プロフィール更新: 長すぎる名前・文字列以外・画像・その他の項目は拒否され、名前は変わらない", async () => {
+    const user = await createUser("before");
+    const cookie = (await signIn(user.email, TEST_PASSWORD)).get("cookie")!;
+    for (const body of [
+      { name: "a".repeat(USER_NAME_MAX + 1) },
+      { name: { $ne: "" } },
+      { name: 123 },
+      { image: "https://evil.example.com/a.png" },
+      { name: "ok", emailVerified: true },
+    ]) {
+      const response = await postToAuthHandler("/update-user", body, { ...origin, cookie });
+      expect(response.status).toBe(400);
+    }
+    expect(await db.user.findUniqueOrThrow({ where: { id: user.id } })).toMatchObject({
+      name: "before",
+      image: null,
+      emailVerified: false,
+    });
+
+    const ok = await postToAuthHandler("/update-user", { name: "  after  " }, { ...origin, cookie });
+    expect(ok.status).toBe(200);
+    expect(await db.user.findUniqueOrThrow({ where: { id: user.id } })).toMatchObject({ name: "after" });
   });
 });
 
