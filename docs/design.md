@@ -274,7 +274,7 @@ project-management-app/
 - Neon 本番 DB、Vercel デプロイ、Resend 設定（本番 URL: `https://projectflow.art-full-stack.com`。手順は [deployment.md](./deployment.md)）
   - 本番デプロイは GitHub Actions のマイグレーション成功後に Deploy Hook で行う（当初の「main への自動デプロイ」から変更）
 - デモアカウント（データの定期リセット方式を検討）
-- README、ER 図、アーキテクチャ図、Server Actions 一覧（API 設計資料）
+- README、ER 図、アーキテクチャ図（[architecture.md](./architecture.md)）、Server Actions 一覧（[server-actions.md](./server-actions.md)）— 作成済み（2026-11-01）
 
 ---
 

@@ -154,6 +154,17 @@ PR #2 の CI で、E2E「キーボードだけでカードを別の列へ移動�
 | 単体テスト | 202 件成功 |
 | 統合テスト | 95 件成功 |
 
+### 2026-11-01: 資料の作成（アーキテクチャ図、Server Actions 一覧）
+
+Phase 5 の残りの資料を作成した。コードは変更していない。
+
+- **[architecture.md](./architecture.md)**: 本番のシステム構成（Vercel sin1・Neon・Resend・GitHub Actions）、環境ごとの違い、アプリ内部のレイヤー、主な処理の流れ（画面の表示、Server Action による更新、カンバンのドラッグ＆ドロップ、パスワード再設定）、リリースの流れを Mermaid で図示
+- **[server-actions.md](./server-actions.md)**: API 設計資料。共通の処理順序・戻り値（`ActionResult`）とエラーの対応・権限表・入力の型、Server Actions 12 個の権限・入力・戻り値・エラー・再検証するパス、Better Auth の API（レート制限・入力検証）、読み取りの経路
+- README・design.md から両資料へリンクした
+- 記載内容は actions / schemas / service / auth の実装と照合した
+
+残り: デモアカウントの方式の決定と実装（design.md の決定事項 P）。
+
 ---
 
 ## Phase 4: 品質向上（2026-10-31 完了）

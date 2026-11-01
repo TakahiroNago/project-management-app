@@ -50,7 +50,7 @@
 - 「各プロジェクトの Owner はちょうど 1 人」を DB トリガーでも保証
 - nonce 付きの Content-Security-Policy、認証 API のレート制限（DB 保存）
 
-詳細: [設計書](docs/design.md) / [ER 図](docs/er-diagram.md)
+詳細: [設計書](docs/design.md) / [アーキテクチャ図](docs/architecture.md) / [Server Actions 一覧（API 設計資料）](docs/server-actions.md) / [ER 図](docs/er-diagram.md)
 
 ## ローカル環境での起動
 
@@ -123,7 +123,7 @@ prisma/             # スキーマ、マイグレーション、シード、CLI 
 scripts/            # GitHub Actions から実行するスクリプト
 tests/integration/  # 統合テスト（実 DB）
 e2e/                # E2E テスト
-docs/               # 設計書・ER 図・本番環境の手順・進捗報告
+docs/               # 設計書・アーキテクチャ図・Server Actions 一覧・ER 図・本番環境の手順・進捗報告
 ```
 
 ## CI
