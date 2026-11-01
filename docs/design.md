@@ -270,7 +270,7 @@ project-management-app/
 - エラー処理・ローディング UI の見直し、アクセシビリティ（カンバンのキーボード操作）
 - レスポンシブ・ダークモードの全画面確認
 
-### Phase 5: 公開 — **実施中**
+### Phase 5: 公開 — **完了（2026-11-01）**
 - Neon 本番 DB、Vercel デプロイ、Resend 設定（本番 URL: `https://projectflow.art-full-stack.com`。手順は [deployment.md](./deployment.md)）
   - 本番デプロイは GitHub Actions のマイグレーション成功後に Deploy Hook で行う（当初の「main への自動デプロイ」から変更）
 - デモアカウント（訪問者ごとの一時アカウント。決定事項 P）— 実装済み（2026-11-01）

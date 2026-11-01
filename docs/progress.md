@@ -1,6 +1,13 @@
 # 進捗・フェーズ報告
 
-## Phase 5: 公開（実施中）
+## Phase 5: 公開（2026-11-01 完了）
+
+### 完了時点のまとめ
+
+- 本番（https://projectflow.art-full-stack.com）で、登録・ログイン・再設定メール・429・ヘッダー・デモ・実機（iPhone の Safari）のタッチ操作を確認した（各項目の結果は下記の 2026-11-01 の記録）
+- リリースの仕組み（Database migration ワークフロー → Deploy Hook）は、preflight の保護ルールの確認（`GITHUB_TOKEN`）と Deploy Hook のステップの成功を、利用者が Actions の画面で確認した
+- 作業が完了したブランチ（`docs/phase5-architecture-api`、`fix/deploy-config-guards`、`fix/e2e-keyboard-timing`、`fix/p1-security-backup-hardening`、`vercel-preview`）を、ローカルと GitHub から削除した（いずれも main にマージ済み）
+- 継続する運用: 論理バックアップは手作業で取得する（頻度は保証しない。自動化は未導入。deployment.md 8.1）。復旧訓練は四半期に 1 回（deployment.md 8.1）
 
 ### 2026-10-31: 本番環境の設定・マイグレーションの仕組み（外部サービスの設定・接続・デプロイは未実施）
 
@@ -245,8 +252,8 @@ Phase 5 の残りの資料を作成した。コードは変更していない。
 | # | 内容 |
 |---|---|
 | 1 | ~~本番の `VERCEL_PROJECT_PRODUCTION_URL` が `projectflow.art-full-stack.com` であることの確認~~ → 確認済み（PR #4 の本番デプロイでビルドが成功し、本番が切り替わった。新規登録・ログインも利用者が確認。本番ドメインからの認証 API は 401、他のサイトからは 403） |
-| 2 | 実機（iOS Safari 等）でのタッチ操作の確認 |
-| 3 | Deploy Hook と `GITHUB_TOKEN` の確認結果の記録（Actions・Vercel の画面で確認） |
+| 2 | ~~実機（iOS Safari 等）でのタッチ操作の確認~~ → 確認済み（利用者が iPhone の Safari で、デモから入り、長押しでカードを移動でき、短いスワイプでは画面がスクロールすることを確認） |
+| 3 | ~~Deploy Hook と `GITHUB_TOKEN` の確認~~ → 確認済み（利用者が直近の Database migration の実行で、preflight の保護ルールの確認と Deploy Hook のステップの成功を確認） |
 | 4 | 論理バックアップは手作業で取得する（頻度は保証しない。自動化は未導入。deployment.md 8.1） |
 
 ---
