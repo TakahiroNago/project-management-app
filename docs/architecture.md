@@ -37,6 +37,7 @@ flowchart LR
   Repo -- "main 以外の push" --> PreviewDeploy["Vercel Preview"] -- Pooled --> PrevDB
   Migrate -- "migrate deploy（Direct）" --> ProdDB
   Migrate -- "成功時のみ Deploy Hook" --> Vercel
+  Cron["Vercel Cron<br/>1 日 1 回"] -- "/api/cron/demo-cleanup" --> App
 ```
 
 - 本番 URL: `https://projectflow.art-full-stack.com`（本番の `*.vercel.app` の URL ではログインできない。deployment.md 5.1）
@@ -44,6 +45,7 @@ flowchart LR
 - アプリは Pooled Connection・アプリ用ロール（テーブルの読み書きのみ）、マイグレーションは Direct Connection・`neondb_owner` を使う
 - Production / Preview は、起動時（`instrumentation.ts`）と DB 接続時（`src/lib/db.ts`）に、接続先のブランチが環境と一致するかを検査する
 - main への push では本番に自動デプロイしない（`vercel.json`）。本番デプロイはマイグレーションのワークフロー経由のみ
+- Vercel Cron が 1 日 1 回、期限切れのデモのユーザーを削除する（deployment.md 5.4）
 
 ## 2. 環境
 

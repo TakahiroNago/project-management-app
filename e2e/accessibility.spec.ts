@@ -27,6 +27,14 @@ for (const colorScheme of ["light", "dark"] as const) {
       }
     });
 
+    test("デモのバナー", async ({ page }) => {
+      await page.goto("/login");
+      await page.getByRole("button", { name: "登録せずにデモを試す" }).click();
+      await expect(page).toHaveURL(/\/dashboard$/);
+      await page.waitForLoadState("networkidle");
+      await expectNoA11yViolations(page, "デモのダッシュボード");
+    });
+
     test("アプリの主要画面", async ({ page }) => {
       await register(page, `E2E a11y ${colorScheme}`);
       const projectUrl = await createProject(page, "E2E アクセシビリティ確認");

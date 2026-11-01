@@ -1,5 +1,6 @@
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
+import { anonymous } from "better-auth/plugins";
 import { describe, expect, it } from "vitest";
 import { AUTH_RATE_LIMIT_RULES, isAuthRateLimitEnabled } from "@/lib/auth/auth";
 import { db } from "@/lib/db";
@@ -16,6 +17,7 @@ function createRateLimitedAuth() {
     database: prismaAdapter(db, { provider: "postgresql" }),
     emailAndPassword: { enabled: true, sendResetPassword: async () => {} },
     rateLimit: { enabled: true, storage: "database", customRules: AUTH_RATE_LIMIT_RULES },
+    plugins: [anonymous({ disableDeleteAnonymousUser: true })],
   });
 }
 
@@ -65,6 +67,19 @@ describe("認証エンドポイントのレート制限（本番と同じルー�
 
     // 回数は DB に保存される（サーバーレスの複数インスタンスで共有される）
     expect(await db.rateLimit.count()).toBeGreaterThan(0);
+  });
+
+  it("デモの開始は 1 時間あたり 3 回まで", async () => {
+    const auth = createRateLimitedAuth();
+    const max = AUTH_RATE_LIMIT_RULES["/sign-in/anonymous"].max;
+    expect(AUTH_RATE_LIMIT_RULES["/sign-in/anonymous"].window).toBe(60 * 60);
+    for (let i = 0; i < max; i++) {
+      const res = await post(auth, "/sign-in/anonymous", {}, "198.51.100.7");
+      expect(res.status).toBe(200);
+    }
+    const blocked = await post(auth, "/sign-in/anonymous", {}, "198.51.100.7");
+    expect(blocked.status).toBe(429);
+    expect(await db.user.count({ where: { isAnonymous: true } })).toBe(max);
   });
 
   it("パスワード再設定メールの要求は 5 分あたり 3 回まで", async () => {

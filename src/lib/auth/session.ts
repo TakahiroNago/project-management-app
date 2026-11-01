@@ -9,6 +9,8 @@ export type CurrentUser = {
   id: string;
   name: string;
   email: string;
+  /** デモ（お試し）のユーザーか */
+  isDemo: boolean;
 };
 
 /**
@@ -18,8 +20,8 @@ export type CurrentUser = {
 export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) return null;
-  const { id, name, email } = session.user;
-  return { id, name, email };
+  const { id, name, email, isAnonymous } = session.user;
+  return { id, name, email, isDemo: isAnonymous === true };
 });
 
 /** ページ・レイアウト用。未ログインならログイン画面へリダイレクトする */

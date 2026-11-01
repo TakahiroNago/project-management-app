@@ -23,14 +23,22 @@ model User {
   image         String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @default(now()) @updatedAt
+  /// デモ（お試し）のユーザー。Better Auth の anonymous プラグインが設定する。期限切れで削除される（src/features/demo）
+  isAnonymous   Boolean  @default(false)
+  /// デモのサンプルデータ用の架空のメンバーの場合、デモを開始したユーザーの ID（そのユーザーと一緒に削除される）
+  demoOwnerId   String?
+  demoOwner     User?    @relation("DemoCompanions", fields: [demoOwnerId], references: [id], onDelete: Cascade)
 
-  sessions      Session[]
-  accounts      Account[]
-  memberships   ProjectMember[]
-  assignedTasks Task[]          @relation("TaskAssignee")
-  comments      Comment[]
-  activityLogs  ActivityLog[]
+  sessions       Session[]
+  accounts       Account[]
+  memberships    ProjectMember[]
+  assignedTasks  Task[]          @relation("TaskAssignee")
+  comments       Comment[]
+  activityLogs   ActivityLog[]
+  demoCompanions User[]          @relation("DemoCompanions")
 
+  @@index([isAnonymous, createdAt])
+  @@index([demoOwnerId])
   @@map("users")
 }
 

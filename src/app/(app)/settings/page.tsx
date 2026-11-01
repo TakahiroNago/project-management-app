@@ -29,7 +29,11 @@ export default async function SettingsPage() {
           <CardDescription>{m.settings.password.description}</CardDescription>
         </CardHeader>
         <CardContent>
-          <ChangePasswordForm />
+          {user.isDemo ? (
+            <p className="text-sm text-muted-foreground">{m.demo.passwordUnavailable}</p>
+          ) : (
+            <ChangePasswordForm />
+          )}
         </CardContent>
       </Card>
     </div>

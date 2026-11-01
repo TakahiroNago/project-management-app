@@ -156,6 +156,7 @@ type ActionResult<T = void> =
 - **入力**: `{ email: string }`（前後の空白を除き小文字にしてから、メールアドレスの形式を検証）
 - **戻り値**: `{ name: string }`（追加したユーザーの名前）
 - **エラー**: ユーザーが存在しない・既にメンバー（同時に追加した場合を含む）→ Validation（`email`）、Member → Forbidden
+- **デモ**: デモのユーザーは自分のデモの架空のメンバーだけを、通常のユーザーは通常のユーザーだけを追加できる。それ以外は「存在しない」と同じエラー
 - **再検証**: `/projects/[id]`（レイアウト以下）
 
 ### `removeMemberAction(projectId, memberUserId)`
@@ -196,6 +197,9 @@ type ActionResult<T = void> =
 | パスワードの再設定 | `POST /api/auth/reset-password` | 5 分に 10 回 | トークンは 30 分有効・使い捨て。既存のセッションはすべて無効化 |
 | パスワード変更 | `POST /api/auth/change-password` | 60 秒に 5 回 | 現在のパスワードが必要 |
 | プロフィール更新 | `POST /api/auth/update-user` | 既定 | `name` 以外の項目は拒否（400 `INVALID_USER_INPUT`） |
+| デモの開始 | `POST /api/auth/sign-in/anonymous` | 1 時間に 3 回 | 一時的なユーザーとサンプルデータを作成してログイン。上限（200 人）・`CRON_SECRET` 未設定の環境では 503 `DEMO_UNAVAILABLE`。デモのユーザーのままでは 400 |
+
+デモのユーザーはパスワードを持たないため、パスワードでのログイン・変更・再設定はできない（再設定メールも送らない）。期限切れのデモは定期処理 `GET /api/cron/demo-cleanup`（`Authorization: Bearer <CRON_SECRET>` が必要。Vercel Cron が 1 日 1 回呼ぶ）で削除する。
 
 パスワードは 8〜128 文字。入力検証フックは `src/lib/auth/user-input.ts`、設定は `src/lib/auth/auth.ts`。
 

@@ -216,10 +216,22 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 | `RESEND_API_KEY` | 本番用のキー | Preview 用のキー（任意） | ✅ |
 | `MAIL_FROM` | `ProjectFlow <no-reply@mail.art-full-stack.com>` | 同じ（`RESEND_API_KEY` を設定する場合は必須） | — |
 | `PREVIEW_MAIL_ALLOWED_RECIPIENTS` | 設定しない | 開発者のメールアドレス（任意） | — |
+| `CRON_SECRET` | 本番用に生成した値（32 文字以上） | 設定しない（Preview でデモを使う場合のみ、別の値） | ✅ |
 
 **設定してはいけない変数**: `DIRECT_URL`（アプリには不要。マイグレーションは GitHub Actions でのみ行う）、`DISABLE_AUTH_RATE_LIMIT`（設定されていると起動しない）、`TEST_DATABASE_URL`。
 
 環境変数は、環境（Production / Preview）を選んで個別に登録します。「All Environments」で登録しないでください（Preview に本番の値が入るのを防ぐため）。
+
+### 5.4 デモアカウントの削除（Vercel Cron）
+
+ログイン画面の「登録せずにデモを試す」で作られる一時的なユーザー（[design.md](./design.md) の決定事項 P）は、Vercel Cron が 1 日 1 回（`vercel.json` の `crons`。毎日 18:00 UTC = 03:00 JST。Hobby プランでは指定した 1 時間の中のどこかで実行される）呼ぶ `/api/cron/demo-cleanup` で削除します。作成から 24 時間を過ぎたものが対象のため、実際の削除は作成の 24〜48 時間後です。
+
+- Vercel は環境変数 `CRON_SECRET` を `Authorization: Bearer <CRON_SECRET>` として送ります。アプリはこれを検証し、一致しなければ 401 を返します
+- **`CRON_SECRET` が無い（32 文字未満を含む）環境では、デモを開始できません**（削除されないデモのユーザーが溜まり続けるのを防ぐため。アプリ自体は通常どおり動きます）
+- 生成: `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`
+- Vercel Cron は Production のデプロイでのみ動きます。Preview でデモを使う場合は、削除は手動で行います（`curl -H "Authorization: Bearer <Preview の CRON_SECRET>" https://<Preview の URL>/api/cron/demo-cleanup`。Deployment Protection がある場合はバイパスの設定も必要）
+- デモのユーザーの数には上限（200 人。架空のメンバーは数えない）があり、達すると削除されるまでデモを開始できません。デモの開始は IP アドレスごとに 1 時間に 3 回までです
+- 実行結果は Vercel の「Cron Jobs」と関数のログ（`[demo] Deleted ...`）で確認できます
 
 ## 6. GitHub（マイグレーション）
 
@@ -393,4 +405,5 @@ gpg --symmetric --cipher-algo AES256 "$FILE" && rm "$FILE"
 - [ ] GitHub: 承認者の設定を外した状態で `target: production` を実行し、preflight で停止することを確認（確認後に設定を戻す）
 - [ ] `target: preview` でマイグレーションを実行し、Preview で登録・ログイン・再設定メール（許可リストの宛先）を確認
 - [ ] `target: production` でマイグレーションと本番デプロイを実行
+- [ ] Vercel: `CRON_SECRET`（Production）を登録し、デプロイ後に「Cron Jobs」に `/api/cron/demo-cleanup` が表示されること、本番でデモを開始できることを確認（5.4）
 - [ ] 本番で: HTTPS、ログイン、再設定メールのリンクが本番ドメインであること、ログイン連続失敗で 429 が返ること、CSP などのヘッダー
