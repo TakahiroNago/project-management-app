@@ -3,7 +3,7 @@
 個人開発者・小規模チーム（2〜10 人）向けのプロジェクト管理 Web アプリケーションです。
 プロジェクト単位でタスクを管理し、進捗・優先度・期限を把握できます。
 
-> **開発状況**: Phase 4（品質向上）まで完了。Phase 5（公開）は本番公開済みで、資料作成とデモアカウントの実装まで完了しています（本番への反映は未実施）。
+> **開発状況**: Phase 1〜5 すべて完了（2026-11-01）。本番公開済みで、資料作成・デモアカウントも本番に反映済みです。
 > 本番 URL: https://projectflow.art-full-stack.com
 > 詳細は [docs/progress.md](docs/progress.md) を参照してください。
 
@@ -28,12 +28,12 @@
 | フレームワーク | Next.js 16（App Router、Server Components、Server Actions） |
 | 言語 / UI | TypeScript 5.9、React 19、Tailwind CSS v4、shadcn/ui、Lucide React |
 | DB / ORM | PostgreSQL 18、Prisma 7（`@prisma/adapter-pg`） |
-| 認証 | Better Auth（メール＋パスワード、DB セッション） |
+| 認証 | Better Auth（メール＋パスワード、DB セッション。デモは anonymous プラグインの一時ユーザー） |
 | バリデーション / フォーム | Zod 4、React Hook Form |
 | ドラッグ＆ドロップ | dnd-kit（core / sortable） |
 | テスト | Vitest（単体・統合）、Playwright（E2E） |
 | CI / マイグレーション | GitHub Actions |
-| 本番環境 | Vercel、Neon（PostgreSQL）、Resend（メール） |
+| 本番環境 | Vercel（デモの削除は Vercel Cron）、Neon（PostgreSQL）、Resend（メール） |
 
 バージョンはすべて `package.json` で固定しています。選定理由（Auth.js から Better Auth への変更など）は [docs/design.md](docs/design.md) を参照してください。
 
@@ -50,6 +50,7 @@
 - 所属していないプロジェクトへのアクセスは「存在しない」（404）として扱う
 - 「各プロジェクトの Owner はちょうど 1 人」を DB トリガーでも保証
 - nonce 付きの Content-Security-Policy、認証 API のレート制限（DB 保存）
+- Vercel 上ではビルド時と起動時に環境変数を検証し、誤りがあればデプロイを失敗させる（本番と Preview の DB の取り違え、本番ドメインと一致しない `BETTER_AUTH_URL` など）
 
 詳細: [設計書](docs/design.md) / [アーキテクチャ図](docs/architecture.md) / [Server Actions 一覧（API 設計資料）](docs/server-actions.md) / [ER 図](docs/er-diagram.md)
 
@@ -91,7 +92,7 @@ npm run dev            # http://localhost:3000
 | `DIRECT_URL` | Prisma のマイグレーション用（Neon の Direct Connection）。ローカルでは不要 |
 | `TEST_DATABASE_URL` | 統合テスト・E2E 用 DB（テスト実行時にデータが削除されます。`DATABASE_URL` と同じ値は不可） |
 | `BETTER_AUTH_SECRET` | セッション署名用の秘密鍵（32 文字以上） |
-| `BETTER_AUTH_URL` | アプリの URL（例: `http://localhost:3000`） |
+| `BETTER_AUTH_URL` | アプリの URL（ローカルは `http://localhost:3000`）。本番は本番ドメインと完全に一致させる（一致しないとビルドが失敗する）。Preview では設定しない |
 | `RESEND_API_KEY` / `MAIL_FROM` | パスワード再設定メールの送信（本番では必須） |
 | `CRON_SECRET` | 期限切れのデモを削除する定期処理の認証（32 文字以上）。Vercel 上では未設定だとデモを開始できない。ローカルでは不要 |
 
