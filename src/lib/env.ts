@@ -99,6 +99,17 @@ export function validateServerEnv(env: Env = process.env): string[] {
   if (deployment === "production") {
     if (!env.BETTER_AUTH_URL || !isHttpsOrigin(env.BETTER_AUTH_URL)) {
       errors.push("BETTER_AUTH_URL must be set to the https origin of the production site (no path).");
+    } else if (!env.VERCEL_PROJECT_PRODUCTION_URL) {
+      errors.push(
+        "VERCEL_PROJECT_PRODUCTION_URL is missing. Enable 'Automatically expose System Environment Variables' in Vercel.",
+      );
+    } else if (new URL(env.BETTER_AUTH_URL).origin !== `https://${env.VERCEL_PROJECT_PRODUCTION_URL}`) {
+      // Better Auth は BETTER_AUTH_URL のオリジンだけを信頼するため、本番ドメインと違うと
+      // 登録・ログイン・パスワード再設定がすべて INVALID_ORIGIN で拒否され、再設定メールのリンクも誤った URL になる。
+      // VERCEL_PROJECT_PRODUCTION_URL は Vercel が設定する本番ドメイン（独自ドメインのうち最も短いもの）
+      errors.push(
+        "BETTER_AUTH_URL must match the production domain of the Vercel project (VERCEL_PROJECT_PRODUCTION_URL).",
+      );
     }
     if (!env.RESEND_API_KEY) errors.push("RESEND_API_KEY must be set.");
     if (!env.MAIL_FROM) errors.push("MAIL_FROM must be set.");

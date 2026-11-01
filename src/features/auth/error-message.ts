@@ -6,6 +6,10 @@ type AuthClientError = { status?: number; code?: string; message?: string };
 export function authErrorMessage(error: AuthClientError, fallback: string = m.errors.unexpected) {
   if (error.status === 429) return m.auth.tooManyRequests;
   switch (error.code) {
+    // Origin の検証で拒否された。ログイン画面でも「メールアドレスまたはパスワードが違う」と誤解させないよう、個別に表示する
+    case "INVALID_ORIGIN":
+    case "MISSING_OR_NULL_ORIGIN":
+      return m.auth.invalidOrigin;
     case "INVALID_EMAIL_OR_PASSWORD":
       return m.auth.login.failed;
     case "USER_ALREADY_EXISTS":

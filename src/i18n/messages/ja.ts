@@ -82,6 +82,9 @@ export const ja = {
       currentPassword: "現在のパスワード",
     },
     tooManyRequests: "試行回数が多すぎます。しばらく待ってから再度お試しください。",
+    // Origin の検証で拒否された（正規の URL 以外からのアクセス、またはサーバーの BETTER_AUTH_URL の設定誤り）
+    invalidOrigin:
+      "このページの URL からは操作できません。ProjectFlow の正しいアドレスを開き直してから再度お試しください。解決しない場合は管理者にお問い合わせください。",
   },
   demo: {
     start: "登録せずにデモを試す",

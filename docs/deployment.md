@@ -163,13 +163,26 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 
 - Preview では `*.vercel.app` のようなワイルドカードを使わず、そのデプロイ自身の URL だけを信頼する（`src/lib/auth/origins.ts`）。他のデプロイや第三者のサイトからは認証 API を呼べない
 - Preview の再設定メールのリンクは Preview の URL になり、本番ドメインを指さない
-- `VERCEL_URL` / `VERCEL_BRANCH_URL` は Vercel のシステム環境変数。プロジェクト設定の「Automatically expose System Environment Variables」を有効にしておく（既定で有効）
+- `VERCEL_URL` / `VERCEL_BRANCH_URL` / `VERCEL_PROJECT_PRODUCTION_URL` は Vercel のシステム環境変数。プロジェクト設定の「Automatically expose System Environment Variables」を有効にしておく（既定で有効）
+- **Production の `BETTER_AUTH_URL` が本番ドメインと違うと、登録・ログイン・パスワード再設定がすべて `403 INVALID_ORIGIN` で拒否され、再設定メールのリンクも誤った URL になる**（2026-11-01 に発生。画面には「予期しないエラー」と表示されていた）。そのため、Production では `BETTER_AUTH_URL` のオリジンが `https://` + `VERCEL_PROJECT_PRODUCTION_URL`（Vercel が設定する本番ドメイン）と一致しなければ、**ビルドと起動を失敗させる**（`src/lib/env.ts`。ビルドで失敗するため、誤った設定のデプロイは本番に切り替わらない）
+- `VERCEL_PROJECT_PRODUCTION_URL` は、プロジェクトの独自ドメインのうち**最も短いもの**になる。このプロジェクトに `projectflow.art-full-stack.com` より短い独自ドメインを追加すると、Production のビルドが失敗するようになるので、追加しない（別のドメインで公開する場合は、`BETTER_AUTH_URL` とこの検査を見直す）
+- `BETTER_AUTH_URL` を変更した後は、再デプロイするまで反映されない
 
 ## 4. Resend（メール）
 
 1. Resend に送信用ドメイン `mail.art-full-stack.com` を追加し、表示される DNS レコード（SPF・DKIM。MX を含む場合あり）を DNS に登録して認証する。DMARC レコードの追加も推奨
 2. API キーを **Production 用と Preview 用で別々に**作成する。権限は「Sending access」、対象ドメインは `mail.art-full-stack.com` に限定する
 3. `MAIL_FROM` は `ProjectFlow <no-reply@mail.art-full-stack.com>` とする
+4. Resend の Domains で、`mail.art-full-stack.com` の状態が **Verified** になったことを確認する
+
+DNS は Cloudflare で管理している（`art-full-stack.com`）。Resend が表示するレコード（通常は `resend._domainkey.mail` の TXT、`send.mail` の MX と TXT）を、値をコピーして登録し、Proxy status は「DNS only」にする。
+
+**ドメインが未認証のままでも、アプリの画面上は成功したように見える**（2026-11-01 に発生）。送信の失敗は、メールアドレスの登録有無を推測されないよう利用者には知らせず、Vercel のログに `[mail] Failed to send password reset email: ...` として記録するだけのため。設定後は、本番で実際に再設定メールを受信できることを必ず確認する（9 章）。DNS の登録状況は次のコマンドで確認できる（何も表示されなければ未登録）。
+
+```powershell
+Resolve-DnsName resend._domainkey.mail.art-full-stack.com -Type TXT -Server 8.8.8.8
+Resolve-DnsName send.mail.art-full-stack.com -Type MX -Server 8.8.8.8
+```
 
 ### Preview でのメール送信制限
 
@@ -399,11 +412,12 @@ gpg --symmetric --cipher-algo AES256 "$FILE" && rm "$FILE"
 - [ ] Neon: 本番・Preview ブランチ、アプリ用のロール（`production_app` / `preview_app`。2.2 の権限）、エンドポイント ID の控え
 - [ ] Neon: 履歴保持の期間を確認して記録（2.5。Free プランは 6 時間）
 - [ ] 毎日の論理バックアップ（8.2）を開始し、1 回目のファイルで `pg_restore --list` の確認と復号の確認を行う
-- [ ] Resend: `mail.art-full-stack.com` の認証、Production・Preview の API キー
+- [ ] Resend: `mail.art-full-stack.com` が Domains で **Verified** であること（DNS の登録だけで終わらせない。4 章）、Production・Preview の API キー
+- [ ] Vercel: Production の `BETTER_AUTH_URL` が `https://projectflow.art-full-stack.com` と完全に一致すること（変更後は再デプロイ。3.2）
 - [ ] Vercel: 環境変数（Production / Preview を分けて登録）、独自ドメイン、`*.vercel.app` から本番ドメインへのリダイレクト、関数のリージョン（`X-Vercel-Id` が `sin1`）、Node.js 24.x、Deploy Hook、Preview の Deployment Protection
 - [ ] GitHub: Environments（`production` の承認者、ブランチ制限は「Selected branches and tags」で `main` のみ）、Secrets、Variables
 - [ ] GitHub: 承認者の設定を外した状態で `target: production` を実行し、preflight で停止することを確認（確認後に設定を戻す）
 - [ ] `target: preview` でマイグレーションを実行し、Preview で登録・ログイン・再設定メール（許可リストの宛先）を確認
 - [ ] `target: production` でマイグレーションと本番デプロイを実行
 - [ ] Vercel: `CRON_SECRET`（Production）を登録し、デプロイ後に「Cron Jobs」に `/api/cron/demo-cleanup` が表示されること、本番でデモを開始できることを確認（5.4）
-- [ ] 本番で: HTTPS、ログイン、再設定メールのリンクが本番ドメインであること、ログイン連続失敗で 429 が返ること、CSP などのヘッダー
+- [ ] 本番で: HTTPS、**新規登録とログイン**（「予期しないエラー」が出ないこと）、**再設定メールを実際に受信できること**と、そのリンクが本番ドメインであること、ログイン連続失敗で 429 が返ること、CSP などのヘッダー

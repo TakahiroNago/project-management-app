@@ -15,6 +15,7 @@ const productionEnv = {
   PRODUCTION_DB_ENDPOINT_ID: PROD_ENDPOINT,
   BETTER_AUTH_SECRET: SECRET,
   BETTER_AUTH_URL: "https://projectflow.art-full-stack.com",
+  VERCEL_PROJECT_PRODUCTION_URL: "projectflow.art-full-stack.com",
   RESEND_API_KEY: "re_live_key",
   MAIL_FROM: "ProjectFlow <no-reply@mail.art-full-stack.com>",
 };
@@ -80,6 +81,11 @@ describe("validateServerEnv", () => {
     ["BETTER_AUTH_URL", { BETTER_AUTH_URL: undefined }],
     ["BETTER_AUTH_URL", { BETTER_AUTH_URL: "http://projectflow.art-full-stack.com" }],
     ["BETTER_AUTH_URL", { BETTER_AUTH_URL: "https://projectflow.art-full-stack.com/app" }],
+    // 本番ドメインと違う URL（*.vercel.app・www 付き・別のドメイン）。登録・ログインが INVALID_ORIGIN になる
+    ["BETTER_AUTH_URL", { BETTER_AUTH_URL: "https://projectflow.vercel.app" }],
+    ["BETTER_AUTH_URL", { BETTER_AUTH_URL: "https://www.projectflow.art-full-stack.com" }],
+    ["BETTER_AUTH_URL", { BETTER_AUTH_URL: "https://projects.art-full-stack.com" }],
+    ["VERCEL_PROJECT_PRODUCTION_URL", { VERCEL_PROJECT_PRODUCTION_URL: undefined }],
     ["RESEND_API_KEY", { RESEND_API_KEY: "" }],
     ["MAIL_FROM", { MAIL_FROM: undefined }],
     ["DATABASE_URL", { DATABASE_URL: undefined }],
