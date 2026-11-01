@@ -244,7 +244,7 @@ Phase 5 の残りの資料を作成した。コードは変更していない。
 
 | # | 内容 |
 |---|---|
-| 1 | 本番の `VERCEL_PROJECT_PRODUCTION_URL` が `projectflow.art-full-stack.com` であることは、このブランチを本番にデプロイしたときに確認できる（違えばビルドが失敗し、本番は切り替わらない） |
+| 1 | ~~本番の `VERCEL_PROJECT_PRODUCTION_URL` が `projectflow.art-full-stack.com` であることの確認~~ → 確認済み（PR #4 の本番デプロイでビルドが成功し、本番が切り替わった。新規登録・ログインも利用者が確認。本番ドメインからの認証 API は 401、他のサイトからは 403） |
 | 2 | 実機（iOS Safari 等）でのタッチ操作の確認 |
 | 3 | Deploy Hook と `GITHUB_TOKEN` の確認結果の記録（Actions・Vercel の画面で確認） |
 | 4 | 論理バックアップを毎日続ける（自動化は未導入） |
