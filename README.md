@@ -3,11 +3,11 @@
 個人開発者・小規模チーム（2〜10 人）向けのプロジェクト管理 Web アプリケーションです。
 プロジェクト単位でタスクを管理し、進捗・優先度・期限を把握できます。
 
-> **開発状況**: Phase 4（品質向上）まで完了。Phase 5（公開）は本番公開済みで、公開後のレビューへの対応と残りの資料作成を進めています。
+> **開発状況**: Phase 4（品質向上）まで完了。Phase 5（公開）は本番公開済みで、資料作成とデモアカウントの実装まで完了しています（本番への反映は未実施）。
 > 本番 URL: https://projectflow.art-full-stack.com
 > 詳細は [docs/progress.md](docs/progress.md) を参照してください。
 
-## 主な機能（Phase 3 時点）
+## 主な機能
 
 - ユーザー登録・ログイン・ログアウト・パスワード再設定（メール）・パスワード変更
 - プロジェクトの作成・編集・削除、名前検索・ステータス絞り込み・並べ替え・ページネーション、進捗率表示
@@ -18,6 +18,7 @@
 - タスクへのコメント（自分のコメントのみ編集・削除可）と更新履歴（誰が・いつ・何を変更したか）
 - Owner / Member の権限管理、ユーザー間のデータ分離
 - ダークモード、レスポンシブ対応（スマートフォンではサイドバーをドロワー表示、カンバンは長押しでドラッグ）
+- デモ: ログイン画面の「登録せずにデモを試す」で、サンプルデータ入りの一時的なアカウントを作成（1〜2 日後に自動で削除）
 - アクセシビリティ: キーボードだけでカンバンを操作可能、全主要画面で WCAG 2.1 AA の自動チェック（axe-core）を実施
 
 ## 技術構成
@@ -50,7 +51,7 @@
 - 「各プロジェクトの Owner はちょうど 1 人」を DB トリガーでも保証
 - nonce 付きの Content-Security-Policy、認証 API のレート制限（DB 保存）
 
-詳細: [設計書](docs/design.md) / [ER 図](docs/er-diagram.md)
+詳細: [設計書](docs/design.md) / [アーキテクチャ図](docs/architecture.md) / [Server Actions 一覧（API 設計資料）](docs/server-actions.md) / [ER 図](docs/er-diagram.md)
 
 ## ローカル環境での起動
 
@@ -92,6 +93,7 @@ npm run dev            # http://localhost:3000
 | `BETTER_AUTH_SECRET` | セッション署名用の秘密鍵（32 文字以上） |
 | `BETTER_AUTH_URL` | アプリの URL（例: `http://localhost:3000`） |
 | `RESEND_API_KEY` / `MAIL_FROM` | パスワード再設定メールの送信（本番では必須） |
+| `CRON_SECRET` | 期限切れのデモを削除する定期処理の認証（32 文字以上）。Vercel 上では未設定だとデモを開始できない。ローカルでは不要 |
 
 本番・Preview の環境変数（`PRODUCTION_DB_ENDPOINT_ID`、`PREVIEW_MAIL_ALLOWED_RECIPIENTS` を含む）と設定手順は [docs/deployment.md](docs/deployment.md) を参照してください。
 
@@ -123,7 +125,7 @@ prisma/             # スキーマ、マイグレーション、シード、CLI 
 scripts/            # GitHub Actions から実行するスクリプト
 tests/integration/  # 統合テスト（実 DB）
 e2e/                # E2E テスト
-docs/               # 設計書・ER 図・本番環境の手順・進捗報告
+docs/               # 設計書・アーキテクチャ図・Server Actions 一覧・ER 図・本番環境の手順・進捗報告
 ```
 
 ## CI

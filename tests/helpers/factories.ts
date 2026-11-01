@@ -13,7 +13,7 @@ export async function createUser(name = `User ${++sequence}`) {
   const result = await auth.api.signUpEmail({
     body: { name, email, password: TEST_PASSWORD },
   });
-  return { id: result.user.id, name, email };
+  return { id: result.user.id, name, email, isDemo: false };
 }
 
 export function projectInput(overrides: Partial<ProjectInput> = {}): ProjectInput {

@@ -28,6 +28,8 @@ erDiagram
     string image "nullable"
     datetime createdAt
     datetime updatedAt
+    boolean isAnonymous "デモのユーザー"
+    string demoOwnerId FK "nullable・デモの架空のメンバー"
   }
   Session {
     string id PK
@@ -132,6 +134,7 @@ erDiagram
 | テーブル | 外部キー | onDelete | 理由 |
 |---|---|---|---|
 | Session / Account | userId → User | Cascade | ユーザー削除時に認証情報も削除 |
+| User | demoOwnerId → User | Cascade | デモを開始したユーザーの削除時に、サンプルデータの架空のメンバーも削除 |
 | ProjectMember | projectId → Project | Cascade | プロジェクト削除時にメンバーシップも削除 |
 | ProjectMember | userId → User | Cascade | — |
 | Task | projectId → Project | Cascade | プロジェクト削除時にタスクも削除 |
@@ -145,6 +148,7 @@ erDiagram
 | テーブル | ユニーク制約 / インデックス | 用途 |
 |---|---|---|
 | User | `UNIQUE(email)` | ログイン |
+| User | `INDEX(isAnonymous, createdAt)`, `INDEX(demoOwnerId)` | 期限切れのデモの検索、デモのユーザー数の上限 |
 | ProjectMember | `UNIQUE(projectId, userId)` | 重複所属の防止、認可チェック |
 | ProjectMember | `INDEX(userId)` | 「自分のプロジェクト一覧」 |
 | Project | `INDEX(status)`, `INDEX(dueDate)` | 絞り込み・並べ替え |
@@ -185,3 +189,4 @@ erDiagram
 - メンバー削除時、そのメンバーの担当タスクの `assigneeId` を null に戻す（同一トランザクション）
 - `Task.position` は (projectId, status) 内で 0 始まりの連番。作成・移動・ステータス変更・削除時に、プロジェクト行をロック（`SELECT ... FOR UPDATE`）したトランザクション内で詰め直す。一時的に同じ値を取り得るため DB の UNIQUE 制約は付けていない
 - `startDate <= dueDate`（Zod で検証）
+- デモのユーザー（`isAnonymous = true`）は、自分のデモの架空のメンバー（`demoOwnerId` が自分）だけをメンバーに追加できる。通常のユーザーはデモのユーザーを追加できない（`canAddAsMember`）。期限切れのデモの削除時は、Owner のプロジェクトを先に削除してからユーザーを削除する（Owner のトリガーに反しないため）

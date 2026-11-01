@@ -1,4 +1,5 @@
 import "server-only";
+import { canAddAsMember } from "@/domain/demo";
 import { Prisma } from "@/generated/prisma/client";
 import { lockProject } from "@/features/tasks/service";
 import { m } from "@/i18n";
@@ -6,14 +7,23 @@ import { authorizeProject } from "@/lib/auth/authorization";
 import { db } from "@/lib/db";
 import { NotFoundError, ValidationError } from "@/lib/errors";
 
-/** 登録済みユーザーをメールアドレスで MEMBER として追加する（Owner のみ） */
+const DEMO_FIELDS = { id: true, isAnonymous: true, demoOwnerId: true } as const;
+
+/**
+ * 登録済みユーザーをメールアドレスで MEMBER として追加する（Owner のみ）。
+ * デモのユーザーは自分のデモの架空のメンバーだけを、通常のユーザーは通常のユーザーだけを追加できる。
+ * 追加できない組み合わせは「見つからない」と同じ応答にする（登録の有無を推測させない）。
+ */
 export async function addMember(actorId: string, projectId: string, email: string) {
   try {
     return await db.$transaction(async (tx) => {
       await authorizeProject(tx, { projectId, userId: actorId, permission: "member:manage" });
 
-      const user = await tx.user.findUnique({ where: { email }, select: { id: true, name: true } });
-      if (!user) throw new ValidationError(m.member.userNotFound, { email: [m.member.userNotFound] });
+      const actor = await tx.user.findUniqueOrThrow({ where: { id: actorId }, select: DEMO_FIELDS });
+      const user = await tx.user.findUnique({ where: { email }, select: { ...DEMO_FIELDS, name: true } });
+      if (!user || !canAddAsMember(actor, user)) {
+        throw new ValidationError(m.member.userNotFound, { email: [m.member.userNotFound] });
+      }
 
       const existing = await tx.projectMember.findUnique({
         where: { projectId_userId: { projectId, userId: user.id } },
@@ -22,7 +32,7 @@ export async function addMember(actorId: string, projectId: string, email: strin
       if (existing) throw new ValidationError(m.member.alreadyMember, { email: [m.member.alreadyMember] });
 
       await tx.projectMember.create({ data: { projectId, userId: user.id, role: "MEMBER" } });
-      return user;
+      return { id: user.id, name: user.name };
     });
   } catch (error) {
     // 同時に同じユーザーを追加した場合は一意制約違反になる
