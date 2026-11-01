@@ -1,4 +1,6 @@
 import type { NextConfig } from "next";
+import { PHASE_PRODUCTION_BUILD } from "next/constants";
+import { assertServerEnv, getDeploymentEnv } from "./src/lib/env";
 
 const securityHeaders = [
   // クリックジャッキング対策
@@ -26,4 +28,12 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default function config(phase: string): NextConfig {
+  // Vercel の Production / Preview では、環境変数の検証（src/lib/env.ts）をビルド時にも行う。
+  // 起動時（src/instrumentation.ts）だけだと、誤った設定のデプロイが本番に切り替わってからサイト全体が止まるが、
+  // ビルドで失敗させれば切り替わらず、それまでの本番デプロイが動き続ける
+  if (phase === PHASE_PRODUCTION_BUILD && getDeploymentEnv(process.env) !== "local") {
+    assertServerEnv(process.env);
+  }
+  return nextConfig;
+}

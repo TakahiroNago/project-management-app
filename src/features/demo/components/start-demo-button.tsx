@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { FieldError } from "@/components/ui/field";
+import { authErrorMessage } from "@/features/auth/error-message";
 import { m } from "@/i18n";
 import { authClient } from "@/lib/auth/auth-client";
 
@@ -23,7 +24,7 @@ export function StartDemoButton() {
           ? m.demo.tooManyRequests
           : error.code === "DEMO_UNAVAILABLE"
             ? m.demo.unavailable
-            : m.demo.failed,
+            : authErrorMessage(error, m.demo.failed),
       );
       setPending(false);
       return;

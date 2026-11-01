@@ -38,6 +38,8 @@ describe("authErrorMessage", () => {
     [{ code: "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL" }, m.auth.register.emailTaken],
     [{ code: "INVALID_PASSWORD" }, m.settings.password.wrongCurrent],
     [{ code: "INVALID_TOKEN" }, m.auth.resetPassword.invalidToken],
+    [{ status: 403, code: "INVALID_ORIGIN" }, m.auth.invalidOrigin],
+    [{ status: 403, code: "MISSING_OR_NULL_ORIGIN" }, m.auth.invalidOrigin],
   ])("Better Auth のエラー %o を日本語のメッセージにする", (error, message) => {
     expect(authErrorMessage(error)).toBe(message);
   });
@@ -45,5 +47,9 @@ describe("authErrorMessage", () => {
   it("想定外のエラーは内部メッセージを表示せず、汎用メッセージにする", () => {
     expect(authErrorMessage({ code: "SOMETHING", message: "internal detail" })).toBe(m.errors.unexpected);
     expect(authErrorMessage({}, "既定")).toBe("既定");
+  });
+
+  it("Origin の検証エラーは、ログイン画面の既定（ログイン失敗）より優先して表示する", () => {
+    expect(authErrorMessage({ status: 403, code: "INVALID_ORIGIN" }, m.auth.login.failed)).toBe(m.auth.invalidOrigin);
   });
 });
