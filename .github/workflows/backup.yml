@@ -1,0 +1,142 @@
+name: Database backup
+
+# 本番・Preview の DB の論理バックアップ（pg_dump）。
+# 取得 → 空の DB への復元テスト → 公開鍵で暗号化 → Cloudflare R2 にアップロード → 31 日を過ぎたものを削除。
+# 接続には読み取り専用のロール（backup_reader）を使う。手順・Secrets の設定は docs/deployment.md 8 章を参照。
+#
+# 定期実行（schedule）は、本番での手動実行と復号の確認が済んでから追加する（docs/progress.md）。
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: バックアップを取得する環境
+        type: choice
+        options: [preview, production]
+        required: true
+
+# contents: 読み取りのみ。actions: Environment の保護ルールの読み取り（scripts/release-guard.ts）
+permissions:
+  contents: read
+  actions: read
+
+# 同じ環境のバックアップは同時に実行しない
+concurrency:
+  group: backup-${{ inputs.target || 'production' }}
+  cancel-in-progress: false
+
+env:
+  # 定期実行では inputs が空のため production とする
+  TARGET: ${{ inputs.target || 'production' }}
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  # Secrets を使う前に、Secrets を使わずに前提条件を検査する
+  preflight:
+    name: Preflight (${{ inputs.target || 'production' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require main branch for production
+        if: env.TARGET == 'production' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Production backups can only be run from the main branch."
+          exit 1
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+
+      - name: Check backup environment protection
+        if: env.TARGET == 'production'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npx tsx scripts/release-guard.ts backup-environment-protection
+
+  backup:
+    name: Backup (${{ inputs.target || 'production' }})
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Environment ごとの Secrets（BACKUP_DATABASE_URL・R2 の API トークン）を使う
+    environment: backup-${{ inputs.target || 'production' }}
+    services:
+      # 復元テスト用の空の DB（ジョブの終了とともに破棄される。ランナーの外からは接続できない）
+      restore-db:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: restore
+          POSTGRES_PASSWORD: restore
+          POSTGRES_DB: restore
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U restore"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - name: Require main branch for production
+        if: env.TARGET == 'production' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Production backups can only be run from the main branch."
+          exit 1
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      # DB の接続情報はこのステップには渡さない（postinstall の prisma generate は接続不要）
+      - run: npm ci
+
+      # Neon と同じメジャーバージョン（18）の pg_dump / pg_restore を、PostgreSQL の公式の apt リポジトリから入れる
+      - name: Install PostgreSQL 18 client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-common > /dev/null
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y > /dev/null
+          sudo apt-get install -y -qq postgresql-client-18 > /dev/null
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+      - name: Show tool versions
+        run: |
+          pg_dump --version
+          pg_restore --version
+          gpg --version | head -n 1
+          aws --version
+
+      # 公開リポジトリのログは誰でも閲覧できるため、以降のステップの出力から DB のホスト名を伏せる
+      - name: Mask database host
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          PRODUCTION_DB_ENDPOINT_ID: ${{ vars.PRODUCTION_DB_ENDPOINT_ID }}
+        run: npx tsx scripts/mask-database-host.ts
+
+      # 接続先・ロールの検査 → 同じスナップショットでダンプ → 空の DB に復元して取得元と比べる
+      - name: Dump and verify
+        env:
+          BACKUP_TARGET: ${{ env.TARGET }}
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          PRODUCTION_DB_ENDPOINT_ID: ${{ vars.PRODUCTION_DB_ENDPOINT_ID }}
+          RESTORE_DATABASE_URL: postgresql://restore:restore@localhost:5432/restore
+          BACKUP_FILE: ${{ runner.temp }}/projectflow.dump
+        run: npx tsx scripts/backup/dump-and-verify.ts
+
+      - name: Encrypt and upload
+        env:
+          BACKUP_TARGET: ${{ env.TARGET }}
+          BACKUP_FILE: ${{ runner.temp }}/projectflow.dump
+          BACKUP_PUBLIC_KEY_FILE: .github/backup/backup-public-key.asc
+          S3_ENDPOINT_URL: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          S3_BUCKET: ${{ vars.R2_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: bash scripts/backup/encrypt-and-upload.sh
+
+      # 途中で失敗した場合も、平文のダンプをランナーに残さない（ランナーはジョブの終了後に破棄されるが、念のため）
+      - name: Remove plaintext dump
+        if: always()
+        run: rm -f "$RUNNER_TEMP/projectflow.dump" "$RUNNER_TEMP/projectflow.dump.gpg"
