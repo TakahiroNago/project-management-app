@@ -445,14 +445,25 @@ Preview → production の順に行い、Preview で通しの動作を確かめ�
 gpg --quick-gen-key "ProjectFlow DB backup" default default never
 
 # 公開鍵をリポジトリに置く（PR でコミットする）
+mkdir -p .github/backup
 gpg --armor --export "ProjectFlow DB backup" > .github/backup/backup-public-key.asc
 
-# 秘密鍵を書き出して、パスワード管理ツールなど 2 か所に保管し、書き出したファイルは削除する
-gpg --armor --export-secret-keys "ProjectFlow DB backup" > projectflow-backup-secret-key.asc
+# 秘密鍵をリポジトリの外に書き出して、パスワード管理ツールなど 2 か所に保管し、書き出したファイルは削除する
+gpg --armor --export-secret-keys "ProjectFlow DB backup" > ~/projectflow-backup-secret-key.asc
 ```
 
 - パスフレーズもパスワード管理ツールに保管する（秘密鍵とパスフレーズの両方がないと復号できない）
 - 失効証明書は `~/.gnupg/openpgp-revocs.d/` に自動で作られる。秘密鍵と一緒に保管する
+
+現在の鍵（2026-11-02 作成、有効期限なし）:
+
+| 項目 | 値 |
+|---|---|
+| ユーザー ID | `ProjectFlow DB backup` |
+| フィンガープリント | `BC3A 1175 934C E0EE 4F41 B061 35AE 6A51 501C D392`（Ed25519） |
+| 暗号化用の副鍵 | `56DB2C08194864FD`（Curve25519。ワークフローは、この鍵で暗号化されたことを確認する） |
+
+鍵を入れ替える場合は、新しい公開鍵を PR でコミットし、この表を更新する。古い秘密鍵は、古い鍵で暗号化したバックアップが保管期間（31 日）を過ぎるまで捨てない。
 
 **2. Neon にバックアップ用のロールを作る**（Preview ブランチと本番ブランチで別々に。パスワードも別にする）
 
@@ -530,7 +541,7 @@ API トークン（R2 → Manage API tokens）は、バケットごとに「**Ob
 3. 復号する（秘密鍵を一時的に読み込み、終わったら鍵束から削除する）
 
 ```bash
-gpg --import projectflow-backup-secret-key.asc
+gpg --import ~/projectflow-backup-secret-key.asc   # パスワード管理ツールから一時的に書き出したもの。読み込んだら削除する
 gpg --output projectflow.dump --decrypt projectflow-production-<日時>.dump.gpg
 
 # アプリのテーブル 10 個と _prisma_migrations の 11 個のデータが含まれること
