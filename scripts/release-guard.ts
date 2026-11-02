@@ -1,8 +1,9 @@
 /**
- * 本番マイグレーション・デプロイの前提条件を検査する（.github/workflows/migrate.yml から実行）。
+ * 本番マイグレーション・デプロイ・バックアップの前提条件を検査する（.github/workflows/migrate.yml・backup.yml から実行）。
  *
  *   npx tsx scripts/release-guard.ts environment-protection   # production Environment の保護ルール（M2）
  *   npx tsx scripts/release-guard.ts commit-is-head           # 実行中のコミットが main の最新か（M1）
+ *   npx tsx scripts/release-guard.ts backup-environment-protection  # backup-production Environment が main のみに制限されているか
  *
  * 環境変数: GITHUB_REPOSITORY / GITHUB_SHA / GITHUB_API_URL（Actions が設定）、GITHUB_TOKEN（読み取り専用）
  * 問題がある・確認できない場合は終了コード 1 で停止する。
@@ -10,6 +11,7 @@
 import { checkCommitIsBranchHead, checkEnvironmentProtection, type GitHubContext } from "../src/lib/release-guards";
 
 const PRODUCTION_ENVIRONMENT = "production";
+const BACKUP_PRODUCTION_ENVIRONMENT = "backup-production";
 const RELEASE_BRANCH = "main";
 
 async function main(): Promise<string[]> {
@@ -25,10 +27,17 @@ async function main(): Promise<string[]> {
   switch (process.argv[2]) {
     case "environment-protection":
       return checkEnvironmentProtection(context, { environment: PRODUCTION_ENVIRONMENT, allowedBranch: RELEASE_BRANCH });
+    // 論理バックアップ（.github/workflows/backup.yml）。定期実行のため承認者は求めず、main だけに制限されていることを確認する
+    case "backup-environment-protection":
+      return checkEnvironmentProtection(context, {
+        environment: BACKUP_PRODUCTION_ENVIRONMENT,
+        allowedBranch: RELEASE_BRANCH,
+        requireReviewers: false,
+      });
     case "commit-is-head":
       return checkCommitIsBranchHead(context, { branch: RELEASE_BRANCH, sha: process.env.GITHUB_SHA });
     default:
-      return ["Unknown check. Use one of: environment-protection, commit-is-head."];
+      return ["Unknown check. Use one of: environment-protection, commit-is-head, backup-environment-protection."];
   }
 }
 

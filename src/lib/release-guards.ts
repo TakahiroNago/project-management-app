@@ -47,12 +47,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Environment に次の保護ルールがあるかを検査する（M2）。
- * - Required reviewers（承認者が 1 人以上）
+ * - Required reviewers（承認者が 1 人以上）。requireReviewers: false のときは検査しない
+ *   （定期実行のバックアップは承認を待てないため。代わりに読み取り専用のロールを使う）
  * - デプロイ元ブランチの制限（Selected branches で、許可されたブランチが allowedBranch のみ）
  */
 export async function checkEnvironmentProtection(
   context: GitHubContext,
-  { environment, allowedBranch }: { environment: string; allowedBranch: string },
+  {
+    environment,
+    allowedBranch,
+    requireReviewers = true,
+  }: { environment: string; allowedBranch: string; requireReviewers?: boolean },
 ): Promise<string[]> {
   const env = await getJson(context, `/environments/${encodeURIComponent(environment)}`);
   if (!env.ok) {
@@ -65,7 +70,7 @@ export async function checkEnvironmentProtection(
   const rules = Array.isArray(env.body.protection_rules) ? env.body.protection_rules : [];
   const reviewersRule = rules.find((rule) => isRecord(rule) && rule.type === "required_reviewers");
   const reviewers = isRecord(reviewersRule) && Array.isArray(reviewersRule.reviewers) ? reviewersRule.reviewers : [];
-  if (reviewers.length === 0) {
+  if (requireReviewers && reviewers.length === 0) {
     errors.push(`The "${environment}" environment has no required reviewers.`);
   }
 

@@ -99,6 +99,31 @@ describe("checkEnvironmentProtection（M2）", () => {
     const fetch = fakeFetch({ [ENV_PATH]: { body: { protection_rules: [], deployment_branch_policy: null } } });
     expect(await checkEnvironmentProtection(context(fetch), options)).toHaveLength(2);
   });
+
+  describe("requireReviewers: false（定期実行のバックアップ）", () => {
+    const noReviewers = { ...options, requireReviewers: false };
+    const withoutReviewers = { ...protectedEnvironment, protection_rules: [{ type: "branch_policy" }] };
+
+    it("承認者がいなくても、デプロイ元が main のみなら問題なし", async () => {
+      const fetch = fakeFetch({ [ENV_PATH]: { body: withoutReviewers }, [POLICIES_PATH]: { body: mainOnly } });
+      expect(await checkEnvironmentProtection(context(fetch), noReviewers)).toEqual([]);
+    });
+
+    it("ブランチの制限が無ければ停止する", async () => {
+      const fetch = fakeFetch({ [ENV_PATH]: { body: { ...withoutReviewers, deployment_branch_policy: null } } });
+      expect((await checkEnvironmentProtection(context(fetch), noReviewers)).join("\n")).toContain(
+        "no deployment branch restriction",
+      );
+    });
+
+    it("main 以外のブランチも許可されていれば停止する", async () => {
+      const fetch = fakeFetch({
+        [ENV_PATH]: { body: withoutReviewers },
+        [POLICIES_PATH]: { body: { total_count: 2, branch_policies: [{ name: "main" }, { name: "feature/*" }] } },
+      });
+      expect((await checkEnvironmentProtection(context(fetch), noReviewers)).join("\n")).toContain("only from the \"main\" branch");
+    });
+  });
 });
 
 describe("checkCommitIsBranchHead（M1）", () => {

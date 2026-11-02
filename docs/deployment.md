@@ -95,6 +95,8 @@ Neon の「Connect」画面で、ブランチ・ロールごとに次の 2 種�
 - `ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO <アプリ用のロール>` により、マイグレーション（`neondb_owner`）で今後作るテーブルにも同じ権限が自動で付く。**新しいテーブルを作るマイグレーションで GRANT を書く必要はない**
 - シーケンスには既定の権限を付けていない。現在の ID はすべて文字列（cuid など）でシーケンスを使わないが、**`autoincrement()` の列を追加する場合は、同じマイグレーションで `GRANT USAGE ON SEQUENCE … TO production_app, preview_app` が必要**（ロールが存在しない環境でも失敗しないよう、ロールの有無を確認してから付与する）
 
+論理バックアップ用に、各ブランチに読み取り専用のロール `backup_reader` を作ります（`SELECT` のみ。作り方は 8.5.3）。接続文字列は Direct Connection の形で、GitHub Environment `backup-production` / `backup-preview` にだけ登録します。
+
 Neon CLI を使う場合、`neon connection-string <ブランチ名>` は既定で **Direct** の接続文字列を返します。どちらの場合も、ホスト名に `-pooler` が付いているかで Pooled / Direct を見分けてください。
 
 > **このリポジトリで `neon env pull` を実行しないでください。** `.env`（無ければ `.env.local`）に `DATABASE_URL`（Pooled）と `DATABASE_URL_UNPOOLED`（Direct）などを書き込みます。`neon link`・`neon checkout`・`neon deploy`（`neon config apply`）も既定で同じ書き込みを行い、`neon init` も初期設定の中で行います。ローカルの `.env` は Docker の DB 用で、リモートの接続情報を置かない方針です（2.3）。`.env.local` に書き込まれた場合も、Next.js の開発サーバーはそちらを優先して読み込むため、`npm run dev` がリモートの DB に接続してしまいます。
@@ -256,6 +258,8 @@ Settings → Environments で 2 つの環境を作成します。
 |---|---|---|
 | `production` | **Required reviewers**（承認者を指定）、Deployment branches を `main` のみに制限 | `DIRECT_URL`（本番ブランチ・`neondb_owner` の Direct）、`VERCEL_DEPLOY_HOOK_URL` |
 | `preview` | なし | `DIRECT_URL`（Preview ブランチ・`neondb_owner` の Direct。`preview_app` はテーブルを作成できないため使わない） |
+| `backup-production` | Deployment branches を `main` のみに制限（承認者なし） | 論理バックアップ用（8.5.3） |
+| `backup-preview` | なし | 論理バックアップ用（8.5.3） |
 
 Settings → Secrets and variables → Actions → **Variables** に、リポジトリ変数 `PRODUCTION_DB_ENDPOINT_ID`（本番ブランチのエンドポイント ID）を登録します。
 
@@ -353,7 +357,7 @@ Preview の DB（Neon の Preview ブランチ）は、**すべての作業ブ�
 |---|---|
 | 継続的なバックアップ | Neon の履歴保持（指定した時点にブランチを復元できる機能）を使う。**現在の Free プランでは 6 時間分しかない**（2.5）。6 時間以内に気付いた障害だけを対象とし、それより前の状態は論理バックアップで戻す |
 | マイグレーション前 | 本番ブランチから**バックアップ用のブランチ**（例: `backup-20261101-add-xxx`）を作成してから実行する。消し忘れを防ぐため、作成時に有効期限を付ける（例: `neon branches create --name <名前> --parent <本番ブランチ> --expires-at <2 週間後の日時>`）。バックアップ用のブランチは本番のデータを含むため、接続情報を Preview や GitHub に設定しない |
-| 論理バックアップ | `pg_dump`（Direct Connection を使う）で取得し、暗号化して DB とは別の場所に保管する（手順は 8.2）。**手作業で可能な範囲で取得しており、取得の頻度（毎日など）は保証しない**（自動化は未導入）。取得から 30 日より古いものは削除するが、最新の 1 つは期間を過ぎても残す。履歴保持が 6 時間しかないため、これが 6 時間を超える障害に対する唯一の戻し先になる |
+| 論理バックアップ | `pg_dump`（Direct Connection を使う）で取得し、暗号化して DB とは別の場所に保管する。履歴保持が 6 時間しかないため、これが 6 時間を超える障害に対する唯一の戻し先になる。**GitHub Actions で毎日取得し、復元テストをしてから Cloudflare R2 に保管する仕組みを用意した**（8.5）。ただし**定期実行はまだ始めていない**（2026-11-02 時点。初期設定と本番での確認が済んでから始める）。それまでは手作業（8.2）で取得し、頻度は保証しない。保管期間は 31 日で、最新の 1 つは期間を過ぎても残す |
 | 復旧の目標 | 目標復旧時点: 6 時間以内に気付いた障害は障害の直前（履歴保持）、それ以外は**最後に取得した論理バックアップの時点**（それ以降のデータはすべて失う。取得の間隔が空くほど失うデータは多くなり、その量に上限は設けていない）。目標復旧時間: 1 時間以内 |
 | 復旧訓練 | 公開前と、その後は四半期に 1 回、本番ブランチの過去の時点から**訓練用の一時ブランチ**（有効期限付き）を作成して手順を確認する。Preview ブランチには復元しない（本番の個人情報が Preview に入るため）。訓練用ブランチの接続情報は Vercel・GitHub に設定せず、確認後に削除する |
 
@@ -381,11 +385,7 @@ gpg --symmetric --cipher-algo AES256 "$FILE" && rm "$FILE"
 - 平文のダンプには本番ユーザーの個人情報とパスワードのハッシュが含まれる。暗号化前のファイルを共有フォルダ・リポジトリの中に置かない
 - 取得した日時を記録しておく（復旧時に、どの時点まで戻るか・どれだけのデータを失うかを判断するため）
 
-**自動化する場合の注意**（未導入。導入するかは今後判断する）:
-
-- 公開リポジトリの GitHub Actions の Artifact は、GitHub にログインした誰でもダウンロードできるため、ダンプの保管先にしない
-- ワークフローで取得する場合は、公開鍵で暗号化してから外部のストレージに送り、復号用の秘密鍵は GitHub に置かない
-- 接続には読み取り専用のバックアップ用ロールを使い、書き込みできる接続情報を GitHub に置かない
+自動で取得する仕組み（GitHub Actions）は 8.5 にあります。
 
 ### 8.3 復旧手順
 
@@ -393,7 +393,7 @@ gpg --symmetric --cipher-algo AES256 "$FILE" && rm "$FILE"
 2. Neon で本番ブランチを、障害の直前の時点またはバックアップ用のブランチの状態に復元する（6 時間以内の時点に限る。2.5）
    - 本番ブランチを「その場で」復元すれば、エンドポイント（接続文字列）は変わらないため、Vercel の設定変更は不要（**未確認**: 初回の復旧訓練で、復元後も接続文字列が変わらないことを確認すること）
    - 別のブランチに復元した場合は接続文字列とエンドポイント ID が変わるため、Vercel の `DATABASE_URL`、GitHub の `DIRECT_URL`、`PRODUCTION_DB_ENDPOINT_ID` をすべて更新する
-   - 6 時間より前の状態に戻す必要がある場合は、論理バックアップ（8.2）を復号し、`pg_restore --clean --if-exists --single-transaction` で本番ブランチに復元する。**バックアップより後のデータは失われる**ため、復元の前に現在の状態も 8.2 の手順で取得しておく
+   - 6 時間より前の状態に戻す必要がある場合は、論理バックアップ（8.2。自動で取得したものは 8.5.5 の手順で取り出す）を復号し、`pg_restore --clean --if-exists --single-transaction` で本番ブランチに復元する。**バックアップより後のデータは失われる**ため、復元の前に現在の状態も 8.2 の手順で取得しておく
 3. `prisma migrate status` でスキーマとマイグレーションの状態を確認する
 4. 本番で動作を確認し、影響を受けたユーザーへの連絡が必要か判断する
 
@@ -406,6 +406,141 @@ gpg --symmetric --cipher-algo AES256 "$FILE" && rm "$FILE"
   2. 一部だけ適用された変更があるか確認する。判断が難しい場合は、8.3 の手順でバックアップ用のブランチの状態に戻すのが最も安全
   3. 原因を修正したマイグレーションを作成し、CI → main → 再度ワークフローを実行する
   4. 部分的な変更を手で戻した場合は、`prisma migrate resolve --rolled-back <マイグレーション名>` で失敗の記録を解消する。本番の接続情報が必要な操作のため、承認者と 2 人で行う
+
+### 8.5 自動バックアップ（GitHub Actions → Cloudflare R2）
+
+`.github/workflows/backup.yml`（Database backup）で論理バックアップを取得します。**現在は手動実行（`workflow_dispatch`）のみ**です。定期実行（毎日 19:00 UTC = 日本時間 4:00。デモの削除の 1 時間後）は、8.5.3 の確認が済んでから追加します。
+
+#### 8.5.1 仕組み
+
+| 段階 | 内容 | 失敗したとき |
+|---|---|---|
+| preflight | production は `main` からの実行に限る。`backup-production` Environment が `main` だけに制限されていることを GitHub API で確認する（`release-guard.ts backup-environment-protection`。定期実行のため承認者は求めない） | Secrets を渡す前に停止 |
+| 接続先の検査 | `BACKUP_DATABASE_URL` が Neon の Direct Connection であり、production なら本番ブランチ・preview なら本番以外を指していること。`neondb_owner`・`*_app` のロールは拒否する（`src/lib/backup/target.ts`） | 停止 |
+| ロールの検査 | 接続したロールが**読み取り専用**であることを DB に問い合わせて確認する。SUPERUSER などの属性・他のロールへの所属（`pg_read_all_data` を除く）・オブジェクトの所有・CREATE 権限・テーブルの変更権限があれば停止。SELECT できないテーブルがあっても停止する（ダンプから漏れるため）（`src/lib/backup/read-only-role.ts`） | 停止 |
+| 取得 | 取得元でスナップショット（REPEATABLE READ）を作り、**同じスナップショットで** `pg_dump --format=custom --snapshot` を実行する | 停止 |
+| 復元テスト | ジョブ内の空の PostgreSQL 18 に `pg_restore --exit-on-error --single-transaction` で復元し、取得元（同じスナップショット）と**全テーブルの行数・スキーマ（列・制約・インデックス・トリガー・関数・enum）・`_prisma_migrations`** が一致することを確認する（`src/lib/backup/snapshot.ts`） | 停止（アップロードしない） |
+| 暗号化 | リポジトリの公開鍵 `.github/backup/backup-public-key.asc` で gpg により暗号化し、平文を削除する。公開鍵の暗号化用の鍵で暗号化されたことを確認する | 停止 |
+| アップロード | R2 の `<target>/projectflow-<target>-<UTC 日時>.dump.gpg` に置き、サイズが一致することを確認する。SHA-256 をメタデータとジョブの Summary に残す | 停止 |
+| 古いものの削除 | アップロードに成功した後にだけ、31 日を過ぎたものを削除する。**最新の 1 つは期間を過ぎても削除しない**（`src/lib/backup/retention.ts`） | ジョブは失敗になる（バックアップ自体は保管済み） |
+
+ログに出すのは、件数・テーブル名・サイズ・キー・SHA-256 だけです。行数・データ・接続情報は出しません（公開リポジトリのログは誰でも閲覧できるため。DB のホスト名は `mask-database-host.ts` で伏せ字にする）。
+
+#### 8.5.2 安全策と、その限界
+
+- **接続情報が漏れた場合**: `backup_reader` は読み取り専用のため、DB の変更・削除はできない。ただし**データは読める**。そのため `backup-production` は `main` からの実行に限り（他のブランチでワークフローを書き換えても Secrets を受け取れない）、ワークフローもそれを確認する
+- **R2 の API トークンが漏れた場合**: R2 のトークンには「書き込みだけ」の権限が無いため、「Object Read & Write」を**そのバケットだけに限定して**使う。読まれても暗号化済みで、復号用の秘密鍵は GitHub に無い。削除はバケットのロック（30 日）で防ぐが、30 日を過ぎたものは削除できてしまう
+- **秘密鍵**: GitHub・リポジトリ・作業フォルダに置かない。失うと**すべてのバックアップを復号できなくなる**ため、パスワード管理ツールなど 2 か所に保管する
+- **Artifact は使わない**（公開リポジトリの Artifact は GitHub にログインした誰でもダウンロードできる）
+- **定期実行が止まる場合**: GitHub は、公開リポジトリで 60 日間活動がないと定期実行を自動で無効にする。失敗の通知は、ワークフローの schedule を最後に変更した人にメールで届く（GitHub の通知設定で Actions のメールを有効にしておく）。止まっていても通知が来ないことがあるため、8.5.4 の確認を月に 1 回行う
+
+#### 8.5.3 初期設定（1 回だけ）
+
+Preview → production の順に行い、Preview で通しの動作を確かめてから本番に進みます。
+
+**1. 暗号化の鍵ペアを作る**（自分の PC。Git Bash の gpg）
+
+```bash
+# ユーザー ID にメールアドレスを入れない（公開鍵は公開リポジトリに置くため）。パスフレーズは聞かれたら入力する
+gpg --quick-gen-key "ProjectFlow DB backup" default default never
+
+# 公開鍵をリポジトリに置く（PR でコミットする）
+gpg --armor --export "ProjectFlow DB backup" > .github/backup/backup-public-key.asc
+
+# 秘密鍵を書き出して、パスワード管理ツールなど 2 か所に保管し、書き出したファイルは削除する
+gpg --armor --export-secret-keys "ProjectFlow DB backup" > projectflow-backup-secret-key.asc
+```
+
+- パスフレーズもパスワード管理ツールに保管する（秘密鍵とパスフレーズの両方がないと復号できない）
+- 失効証明書は `~/.gnupg/openpgp-revocs.d/` に自動で作られる。秘密鍵と一緒に保管する
+
+**2. Neon にバックアップ用のロールを作る**（Preview ブランチと本番ブランチで別々に。パスワードも別にする）
+
+パスワードを Neon の SQL Editor に入力すると、クエリの履歴に残ります。そのため、ロールの作成は SQL Editor で行い、パスワードは psql の `\password`（ハッシュだけを送る）で設定します。
+
+```sql
+-- SQL Editor（対象のブランチ、neondb_owner）で実行する
+CREATE ROLE backup_reader LOGIN;
+GRANT CONNECT ON DATABASE neondb TO backup_reader;
+GRANT USAGE ON SCHEMA public TO backup_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO backup_reader;
+GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO backup_reader;
+-- マイグレーション（neondb_owner）で今後作るテーブル・シーケンスにも SELECT を付ける
+ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public GRANT SELECT ON TABLES TO backup_reader;
+ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public GRANT SELECT ON SEQUENCES TO backup_reader;
+```
+
+```bash
+# パスワードを生成する（URL にそのまま入れられるよう、16 進数の文字だけにする）。表示されたものをパスワード管理ツールに保存する
+openssl rand -hex 32
+
+# 対象のブランチの neondb_owner の Direct Connection で psql に接続し、パスワードを設定する
+read -rs DIRECT_URL && export DIRECT_URL
+MSYS_NO_PATHCONV=1 docker run --rm -it -e DIRECT_URL postgres:18-alpine sh -c 'psql "$DIRECT_URL"'
+#   neondb=> \password backup_reader
+#   neondb=> \q
+unset DIRECT_URL
+```
+
+`BACKUP_DATABASE_URL` は次の形です（ホストは対象のブランチの Direct Connection のもの。`-pooler` を付けない）。
+
+```
+postgresql://backup_reader:<パスワード>@ep-xxxx.<region>.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+```
+
+**3. Cloudflare R2 のバケットを作る**（環境ごとに 1 つ）
+
+| 項目 | Preview | 本番 |
+|---|---|---|
+| バケット名 | `projectflow-backup-preview` | `projectflow-backup-production` |
+| 場所（Location hint） | Asia-Pacific | Asia-Pacific |
+| バケットのロック（Bucket lock rules） | プレフィックス `preview/`、30 日 | プレフィックス `production/`、30 日 |
+| ライフサイクルの削除ルール | 追加しない（古いものの削除はワークフローが行い、最新の 1 つを残すため） | 同左 |
+| 公開アクセス（Public access・r2.dev） | 無効のまま | 無効のまま |
+
+API トークン（R2 → Manage API tokens）は、バケットごとに「**Object Read & Write**」で「**Apply to specific buckets only**」を選んで作ります。アクセスキー ID・シークレットは作成時にしか表示されないため、そのまま GitHub に登録します。
+
+**4. GitHub の Environment を作る**（Settings → Environments）
+
+| Environment | 保護ルール | Secrets | Variables |
+|---|---|---|---|
+| `backup-preview` | なし | `BACKUP_DATABASE_URL`（Preview ブランチの `backup_reader`）、`R2_ACCOUNT_ID`、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`（Preview のバケットのトークン） | `R2_BUCKET` = `projectflow-backup-preview` |
+| `backup-production` | **Deployment branches を「Selected branches and tags」で `main` のみ**（承認者は付けない。定期実行が承認待ちで止まるため） | 同じ名前で本番の値 | `R2_BUCKET` = `projectflow-backup-production` |
+
+`PRODUCTION_DB_ENDPOINT_ID` は既存のリポジトリ変数を使います（6.1）。
+
+**5. 動作を確認する**
+
+1. 公開鍵（`.github/backup/backup-public-key.asc`）を PR でコミットし、main にマージする
+2. Actions → Database backup → `target: preview` で実行し、成功することを確認する
+3. 8.5.5 の手順で Preview のファイルを取り出し、復号できることを確認する
+4. `target: production` で実行し、同じく取り出して復号できることを確認する
+5. ワークフローに `schedule` を追加し（PR）、翌日に定期実行が成功したことを確認する
+
+#### 8.5.4 定期的な確認（月に 1 回）
+
+- Actions → Database backup の最近の実行がすべて成功していること（定期実行が無効になっていないこと）
+- R2 の `projectflow-backup-production` に、直近の日付のファイルがあること
+- 四半期の復旧訓練（8.1）では、R2 のファイルを 8.5.5 の手順で取り出し、復号と `pg_restore --list` まで行う
+
+#### 8.5.5 R2 から取り出して復号する
+
+1. Cloudflare の画面（R2 → バケット → オブジェクト）から、対象の `.dump.gpg` をダウンロードする（PC の作業フォルダ・リポジトリの外に置く）
+2. ジョブの Summary に出ている SHA-256 と一致することを確認する: `sha256sum <ファイル>`
+3. 復号する（秘密鍵を一時的に読み込み、終わったら鍵束から削除する）
+
+```bash
+gpg --import projectflow-backup-secret-key.asc
+gpg --output projectflow.dump --decrypt projectflow-production-<日時>.dump.gpg
+
+# アプリのテーブル 10 個と _prisma_migrations の 11 個のデータが含まれること
+MSYS_NO_PATHCONV=1 docker run --rm -i postgres:18-alpine pg_restore --list < projectflow.dump | grep -c "TABLE DATA"
+
+# 作業が終わったら、秘密鍵を鍵束から削除する（フィンガープリントは gpg --list-secret-keys で確認）
+gpg --delete-secret-keys <フィンガープリント>
+```
+
+復号したファイル（`projectflow.dump`）は平文で、本番ユーザーの個人情報を含みます。8.3 の復元が終わったら削除してください。
 
 ## 9. 公開前のチェックリスト
 
