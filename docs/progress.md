@@ -58,11 +58,40 @@
 | 3 | Neon 上での確認（未確認）: SQL で作ったロールが検査を通ること、Neon のダンプが素の PostgreSQL 18 に復元できること、R2 での PUT・ロック・削除の動作 |
 | 4 | 本番での手動実行と復号の確認の後、`schedule` を追加する（フェーズ C） |
 
-### フェーズ B: 外部サービスの設定と Preview での確認（2026-11-02 開始）
+### フェーズ B: 外部サービスの設定と Preview での確認（2026-11-02 開始、2026-11-03 完了）
 
 - **鍵ペア**（2026-11-02、利用者が作成）: 公開鍵を `.github/backup/backup-public-key.asc` に追加し、フィンガープリントを deployment.md 8.5.3 に記録した。確認した点: 鍵は 1 つ、秘密鍵のパケットを含まない、ユーザー ID にメールアドレスを含まない、有効期限なし、暗号化用の副鍵がある。ワークフローと同じ gpg のコマンドで暗号化でき、宛先がその副鍵になること、平文のパケットが無いことも確認した。秘密鍵とパスフレーズは利用者が保管し、書き出したファイルは削除済み
 - 手順書の修正: 公開鍵の書き出しの前に `mkdir -p .github/backup` を追加。秘密鍵の書き出し先・読み込み元を、リポジトリの外（`~/`）に変更
-- 未了: Neon の `backup_reader`（Preview）、R2（Preview）、GitHub の `backup-preview` Environment、Preview での実行
+- **Preview の設定**（利用者が設定）: Neon の Preview ブランチの `backup_reader`、R2 のバケット `projectflow-backup-preview` とバケットロック、GitHub の `backup-preview` Environment（Secrets・`R2_BUCKET`）
+
+#### Preview での確認結果（2026-11-03）
+
+Actions → Database backup を `target: preview` で手動実行した（Run ID `41598322406`、`main` の `d03662c`）。
+
+| 項目 | 結果 |
+|---|---|
+| Preflight (preview) / Backup (preview) | 両ジョブとも成功 |
+| 接続先・読み取り専用ロールの検査 | 成功（`Dump and verify` ステップが成功。Neon の SQL で作った `backup_reader` が検査を通った） |
+| 取得と復元テスト | 成功。ログ: `Test restore passed: 11 tables, 222 schema objects and 3 migrations match the source.`（Neon のダンプが空の PostgreSQL 18 に復元でき、取得元と行数・スキーマ・マイグレーションが一致） |
+| 暗号化 | 成功（公開鍵の暗号化用の副鍵 `56DB2C08194864FD` が宛先であることを、ワークフローが確認） |
+| R2 へのアップロード | 成功。`preview/projectflow-preview-20261103T074808Z.dump.gpg`（34,966 bytes） |
+| 取り出し（8.5.5） | R2 からダウンロードしたファイルの SHA-256 が、ジョブの Summary の値と一致 |
+| 復号（8.5.5） | KeePassXC に保管した秘密鍵で復号に成功 |
+| 中身の確認（8.5.5） | PostgreSQL 18.6 の `pg_restore --list` で、11 テーブルすべての TABLE と TABLE DATA、主キー・インデックス・外部キー・トリガーを確認（カスタム形式、TOC 92 件） |
+| R2 のバケットロック | Cloudflare の画面で、ルール `preview-backup-30-days`（プレフィックス `preview/`、30 日、Enabled）が有効なことを確認 |
+
+- Neon 上での確認として残っていた項目（フェーズ A の残課題 3）のうち、ロールの検査・PostgreSQL 18 への復元・R2 への PUT は、上記で確認できた
+- リポジトリの `.gitignore` に `*.dump`・`*.dump.gpg` を追加した（復号したダンプ・ダウンロードしたファイルを誤ってコミットしないため）
+
+#### 未確認の項目（フェーズ C 以降）
+
+| # | 内容 | 確認の時期 |
+|---|---|---|
+| 1 | R2 での古いファイルの削除（31 日を過ぎたものの DeleteObject）。31 日を過ぎたファイルがまだ無いため、削除の処理は実際には動いていない | 定期実行の開始から 31 日を過ぎた後の、月 1 回の確認（deployment.md 8.5.4） |
+| 2 | バケットロックの実際の動作（30 日以内のファイルの削除・上書きが拒否されること、30 日を過ぎたら削除できること）。確認したのはルールの設定だけ | 同上 |
+| 3 | 本番の設定（Neon の `backup_reader`、R2 の `projectflow-backup-production`、`backup-production` Environment）、本番での手動実行と復号 | フェーズ C |
+| 4 | `schedule` の追加と、定期実行の成功 | フェーズ C |
+| 5 | 所有者・権限を付けたままの復元（deployment.md 8.3 の手順）。ワークフローの復元テストは `--no-owner --no-privileges` で行う | 四半期の復旧訓練（deployment.md 8.1） |
 
 ## Phase 5: 公開（2026-11-01 完了）
 

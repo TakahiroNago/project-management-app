@@ -24,6 +24,10 @@
 .DS_Store
 *.pem
 
+# database backups (plaintext dumps and downloaded encrypted files)
+*.dump
+*.dump.gpg
+
 # debug
 npm-debug.log*
 yarn-debug.log*
