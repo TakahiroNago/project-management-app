@@ -40,11 +40,17 @@ export function runPgCommand(command: string, args: string[], env: NodeJS.Proces
         stderrTruncated = true;
         return;
       }
-      if (chunk.length > room) stderrTruncated = true;
-      const kept = chunk.subarray(0, room);
+      // 上限を超える分は保持しない。subarray は元のチャンク全体を参照し続けるため、収まる部分だけをコピーする
+      // （上限に達した後も読み続けて捨てる。読まないと、子プロセスがパイプへの書き込みで止まるため）
+      let kept = chunk;
+      if (chunk.length > room) {
+        stderrTruncated = true;
+        kept = Buffer.from(chunk.subarray(0, room));
+      }
       chunks.push(kept);
       size += kept.length;
     });
+    // "close" は、子プロセスの終了後に標準エラーを最後まで読み終えてから発生する（"exit" は読み終える前に発生しうる）
     child.on("error", (e: NodeJS.ErrnoException) => reject(new Error(`Could not start ${command} (${e.code ?? "unknown error"}).`)));
     child.on("close", (exitCode, signal) => {
       resolve({ exitCode, signal, stderr: Buffer.concat(chunks).toString("utf8"), stderrTruncated });

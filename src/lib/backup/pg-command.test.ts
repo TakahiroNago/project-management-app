@@ -29,9 +29,9 @@ function expectNoSecrets(messages: string[]) {
   for (const secret of SECRETS) expect(text).not.toContain(secret);
 }
 
-/** 標準エラーに text を書いて exitCode で終了する子プロセス（pg_restore の代わり） */
+/** 標準エラーに text を書いて exitCode で終了する子プロセス（pg_restore の代わり）。書き込みの完了を待ってから終了する */
 function fakePgRestore(text: string, exitCode: number): [string, string[]] {
-  const script = `process.stderr.write(${JSON.stringify(text)} + "\\n"); process.exit(${exitCode});`;
+  const script = `process.stderr.write(${JSON.stringify(text)} + "\\n", () => { process.exitCode = ${exitCode}; });`;
   return [process.execPath, ["-e", script]];
 }
 
@@ -88,11 +88,27 @@ describe("runPgCommandSafely（実際の子プロセス）", () => {
   });
 
   it("標準エラーが上限を超えたら切り詰め、そのことだけを出す", async () => {
-    const script = `process.stderr.write("x".repeat(${MAX_STDERR_BYTES + 10})); process.exit(1);`;
+    // Linux ではパイプへの書き込みが非同期のため、書き込みの完了を待ってから終了する
+    // （process.exit() をすぐに呼ぶと、届く前に終了して上限に達しない）
+    const script = `process.stderr.write("x".repeat(${MAX_STDERR_BYTES + 10}), () => { process.exitCode = 1; });`;
     const result = await runPgCommand(process.execPath, ["-e", script], process.env);
-    expect(result.stderrTruncated).toBe(true);
+    expect(result).toMatchObject({ exitCode: 1, stderrTruncated: true });
     expect(Buffer.byteLength(result.stderr)).toBe(MAX_STDERR_BYTES);
     expect(describePgResult("pg_restore", result).join("\n")).toContain("output truncated");
+  });
+
+  it("標準エラーがちょうど上限なら、切り詰めない", async () => {
+    const script = `process.stderr.write("x".repeat(${MAX_STDERR_BYTES}), () => { process.exitCode = 1; });`;
+    const result = await runPgCommand(process.execPath, ["-e", script], process.env);
+    expect(result).toMatchObject({ exitCode: 1, stderrTruncated: false });
+    expect(Buffer.byteLength(result.stderr)).toBe(MAX_STDERR_BYTES);
+  });
+
+  it("上限を大きく超えても、上限までしか保持せず、子プロセスは最後まで書き込める", async () => {
+    const script = `process.stderr.write("x".repeat(${MAX_STDERR_BYTES * 4}), () => { process.exitCode = 3; });`;
+    const result = await runPgCommand(process.execPath, ["-e", script], process.env);
+    expect(result).toMatchObject({ exitCode: 3, stderrTruncated: true });
+    expect(Buffer.byteLength(result.stderr)).toBe(MAX_STDERR_BYTES);
   });
 });
 

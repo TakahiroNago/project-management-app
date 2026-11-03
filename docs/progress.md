@@ -99,7 +99,7 @@ Actions → Database backup を `target: preview` で手動実行した（Run ID
 
 - **修正** `src/lib/backup/pg-command.ts`: 標準エラーはメモリ上に保持し（上限 1 MiB。ファイルには書かない）、ログには終了コード・行数・エラーの分類・取得元に実在するテーブル名だけを出す。標準出力は捨てる。成功時に警告があった場合も要約だけを出す
 - **修正** `scripts/backup/dump-and-verify.ts`: 上記を使う。想定外の PostgreSQL のエラー（`pg.DatabaseError`）は、メッセージではなく SQLSTATE だけを出す
-- **テスト** `src/lib/backup/pg-command.test.ts`（12 件）: 実際の `pg_restore` の出力（ダミーの値 `dummy@example.test`）を子プロセスに出させ、値・`DETAIL`・`CONTEXT` がメッセージに出ないこと、分類・テーブル名・終了コード・切り詰め・起動の失敗を確認
+- **テスト** `src/lib/backup/pg-command.test.ts`（14 件）: 実際の `pg_restore` の出力（ダミーの値 `dummy@example.test`）を子プロセスに出させ、値・`DETAIL`・`CONTEXT` がメッセージに出ないこと、分類・テーブル名・終了コード・切り詰め・起動の失敗を確認。子プロセスは書き込みの完了を待ってから終了する（Linux ではパイプへの書き込みが非同期のため、すぐに `process.exit()` すると出力が途中で切れる）
 - **手動の確認**（ローカルの Docker の PostgreSQL 18.6）: 実際の `pg_dump`（成功）と `pg_restore`（一意制約の違反で失敗）で、要約だけが出て値が出ないことを確認した
 - 正常時の動作（取得・復元テスト・比較）は変えていない。本番・Preview の DB、ワークフロー、Secrets は変更していない
 
