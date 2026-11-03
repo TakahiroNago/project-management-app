@@ -16,12 +16,13 @@
  *
  * 接続文字列は pg_dump / pg_restore の引数ではなく環境変数（PGHOST など）で渡す。
  * ログには件数・テーブル名などのスキーマの情報だけを出し、行数やデータは出さない。
+ * pg_dump / pg_restore の標準エラーは行のデータを含むことがあるため、そのまま出さずに要約だけを出す（src/lib/backup/pg-command.ts）。
  */
-import { spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import pg from "pg";
 import { isLocalDatabaseUrl } from "../../src/lib/database-url";
 import { libpqEnv } from "../../src/lib/backup/libpq-env";
+import { runPgCommandSafely } from "../../src/lib/backup/pg-command";
 import { checkReadOnlyRole } from "../../src/lib/backup/read-only-role";
 import { checkSourceSnapshot, collectSnapshot, compareSnapshots } from "../../src/lib/backup/snapshot";
 import { checkBackupTarget } from "../../src/lib/backup/target";
@@ -42,19 +43,21 @@ function requireEnv(name: string): string {
   return value;
 }
 
-/** pg_dump / pg_restore を実行する。標準出力・標準エラーはそのまま流す（ホスト名は呼び出し側で伏せ字にしている） */
-function run(command: string, args: string[], connectionUrl: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      env: { ...process.env, ...libpqEnv(connectionUrl), BACKUP_DATABASE_URL: "", RESTORE_DATABASE_URL: "" },
-      stdio: ["ignore", "inherit", "inherit"],
-    });
-    child.on("error", (e) => reject(new StepError([`Could not start ${command} (${e.message}).`])));
-    child.on("exit", (code, signal) => {
-      if (code === 0) resolve();
-      else reject(new StepError([`${command} failed (exit code ${code ?? signal}).`]));
-    });
-  });
+/**
+ * pg_dump / pg_restore を実行する。標準エラーは行のデータを含むことがあるため、ログには出さずに要約だけを出す
+ * （終了コード・行数・エラーの分類・取得元に実在するテーブル名）。
+ * @param knownTables 取得元のテーブル名（スキーマなし）。要約に出してよいテーブル名
+ */
+async function run(command: string, args: string[], connectionUrl: string, knownTables: Iterable<string> = []): Promise<void> {
+  const env = { ...process.env, ...libpqEnv(connectionUrl), BACKUP_DATABASE_URL: "", RESTORE_DATABASE_URL: "" };
+  const { ok, messages } = await runPgCommandSafely(command, args, env, { knownTables });
+  if (!ok) fail(...messages);
+  for (const message of messages) console.warn(`::warning::${message}`);
+}
+
+/** "public.users" → "users"（pg_restore のエラーはスキーマなしのテーブル名を出すため） */
+function tableNames(rowCounts: Record<string, string>): string[] {
+  return Object.keys(rowCounts).map((name) => name.slice(name.indexOf(".") + 1));
 }
 
 async function connect(url: string): Promise<pg.Client> {
@@ -120,6 +123,7 @@ async function main() {
         "pg_restore",
         ["--exit-on-error", "--single-transaction", "--no-owner", "--no-privileges", "--no-password", `--dbname=${libpqEnv(restoreUrl).PGDATABASE}`, file],
         restoreUrl,
+        tableNames(sourceSnapshot.rowCounts),
       );
       const restoredSnapshot = await collectSnapshot(restore);
       const diff = compareSnapshots(sourceSnapshot, restoredSnapshot);
@@ -137,8 +141,16 @@ async function main() {
   }
 }
 
+/**
+ * 想定外のエラーのメッセージ。PostgreSQL のエラー（SQLSTATE を持つもの）はメッセージに値を含むことがあるため、SQLSTATE だけを出す
+ */
+function unexpectedError(e: unknown): string {
+  if (e instanceof pg.DatabaseError) return `Unexpected database error (SQLSTATE ${e.code ?? "unknown"}).`;
+  return `Unexpected error: ${e instanceof Error ? e.message : "unknown error"}`;
+}
+
 main().catch((e: unknown) => {
-  const errors = e instanceof StepError ? e.errors : [`Unexpected error: ${e instanceof Error ? e.message : "unknown error"}`];
+  const errors = e instanceof StepError ? e.errors : [unexpectedError(e)];
   for (const error of errors) console.error(`::error::${error}`);
   process.exit(1);
 });

@@ -426,6 +426,8 @@ gpg --symmetric --cipher-algo AES256 "$FILE" && rm "$FILE"
 
 ログに出すのは、件数・テーブル名・サイズ・キー・SHA-256 だけです。行数・データ・接続情報は出しません（公開リポジトリのログは誰でも閲覧できるため。DB のホスト名は `mask-database-host.ts` で伏せ字にする）。
 
+`pg_dump`・`pg_restore` の標準エラーもログに出しません。PostgreSQL のエラーには行のデータが含まれることがあるためです（例: `DETAIL:  Key (email)=(…) already exists.`、`CONTEXT:  COPY users, line 1, column email: "…"`）。失敗したときは、終了コード・行数・エラーの分類（`unique_violation` など）・取得元に実在するテーブル名だけを出します（`src/lib/backup/pg-command.ts`）。詳しい原因は、8.2 の手順で手元の PC に取得したダンプを、ネットワークを切ったコンテナに復元して調べてください。
+
 #### 8.5.2 安全策と、その限界
 
 - **接続情報が漏れた場合**: `backup_reader` は読み取り専用のため、DB の変更・削除はできない。ただし**データは読める**。そのため `backup-production` は `main` からの実行に限り（他のブランチでワークフローを書き換えても Secrets を受け取れない）、ワークフローもそれを確認する
