@@ -4,6 +4,7 @@
 プロジェクト単位でタスクを管理し、進捗・優先度・期限を把握できます。
 
 > **開発状況**: Phase 1〜5 すべて完了（2026-11-01）。本番公開済みで、資料作成・デモアカウントも本番に反映済みです。
+> 公開後の運用改善として、本番 DB の自動バックアップを追加しました（2026-11-04。毎日の定期実行は 2026-11-05 に初回の予定）。
 > 本番 URL: https://projectflow.art-full-stack.com
 > 詳細は [docs/progress.md](docs/progress.md) を参照してください。
 
@@ -34,6 +35,7 @@
 | テスト | Vitest（単体・統合）、Playwright（E2E） |
 | CI / マイグレーション | GitHub Actions |
 | 本番環境 | Vercel（デモの削除は Vercel Cron）、Neon（PostgreSQL）、Resend（メール） |
+| バックアップ | GitHub Actions、`pg_dump` / `pg_restore`、GnuPG（暗号化）、Cloudflare R2（保管） |
 
 バージョンはすべて `package.json` で固定しています。選定理由（Auth.js から Better Auth への変更など）は [docs/design.md](docs/design.md) を参照してください。
 
@@ -119,11 +121,12 @@ src/
 ├── components/     # 共通 UI（ui/ は shadcn/ui の生成物）
 ├── domain/         # 純粋関数のビジネスロジック + 単体テスト
 ├── features/       # 機能ごとの actions / service / queries / schemas / components
+├── hooks/          # 共通の React フック
 ├── i18n/           # UI 文言・日付書式（将来の英語対応に備えて集約）
 ├── lib/            # DB、認証、エラー処理などの基盤
 └── proxy.ts
 prisma/             # スキーマ、マイグレーション、シード、CLI の接続先の決定（migration-url.ts）
-scripts/            # GitHub Actions から実行するスクリプト
+scripts/            # GitHub Actions から実行するスクリプト（backup/: バックアップの取得・暗号化・保管）
 tests/integration/  # 統合テスト（実 DB）
 e2e/                # E2E テスト
 docs/               # 設計書・アーキテクチャ図・Server Actions 一覧・ER 図・本番環境の手順・進捗報告
@@ -138,3 +141,14 @@ Pull Request と main への push で GitHub Actions が以下を実行します
 3. E2E テスト（PostgreSQL サービスコンテナ + Chromium）
 
 本番 DB へのマイグレーションと本番デプロイは、手動実行・承認付きのワークフロー（[.github/workflows/migrate.yml](.github/workflows/migrate.yml)）で行います。手順は [docs/deployment.md](docs/deployment.md) を参照してください。
+
+## バックアップ
+
+本番 DB の論理バックアップを、毎日 04:00 JST（19:00 UTC）に GitHub Actions で取得します（[.github/workflows/backup.yml](.github/workflows/backup.yml)）。GitHub の定期実行は遅れることがあります。Preview と本番は手動でも実行できます。
+
+1. 実行元のブランチ・接続先・ロールを検査（本番は `main` からのみ。接続は読み取り専用ロール `backup_reader`）
+2. `pg_dump` で取得し、ジョブ内の空の PostgreSQL 18 に復元して、行数・スキーマ・マイグレーション履歴が取得元と一致することを確認
+3. 公開鍵で暗号化し、Cloudflare R2 にアップロードしてサイズを確認（秘密鍵は GitHub に置きません）
+4. 31 日を過ぎたものを削除（アップロードの成功後のみ。最新の 1 つは残します）
+
+Neon の Free プランの履歴保持は 6 時間のため、それより前の状態に戻す手段はこのバックアップです。取得後のデータは復元できません。設定・復旧の手順と安全策の限界は [docs/deployment.md](docs/deployment.md) の 8 章を参照してください。
