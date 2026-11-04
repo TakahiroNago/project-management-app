@@ -4,8 +4,11 @@ name: Database backup
 # 取得 → 空の DB への復元テスト → 公開鍵で暗号化 → Cloudflare R2 にアップロード → 31 日を過ぎたものを削除。
 # 接続には読み取り専用のロール（backup_reader）を使う。手順・Secrets の設定は docs/deployment.md 8 章を参照。
 #
-# 定期実行（schedule）は、本番での手動実行と復号の確認が済んでから追加する（docs/progress.md）。
 on:
+  schedule:
+    # 毎日 04:00 JST（19:00 UTC）
+    - cron: '0 19 * * *'
+
   workflow_dispatch:
     inputs:
       target:
